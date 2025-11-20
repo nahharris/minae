@@ -4,7 +4,9 @@ import (
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
+	"github.com/nahharris/minae/pkg/world"
 )
 
 // Player represents the first-person character in the game.
@@ -13,6 +15,12 @@ type Player struct {
 	Camera           rl.Camera3D
 	MovementSpeed    float32
 	MouseSensitivity float32
+
+	// Interaction & Inventory
+	Inventory          []*blocks.Block
+	SelectedBlockIndex int
+	TargetBlock        rl.Vector3
+	HasTarget          bool
 }
 
 // NewPlayer creates a new Player instance with default settings.
@@ -29,6 +37,7 @@ func NewPlayer(position rl.Vector3) *Player {
 		Camera:           camera,
 		MovementSpeed:    config.Current.PlayerSpeed,
 		MouseSensitivity: config.Current.MouseSens,
+		Inventory:        blocks.GetAll(),
 	}
 }
 
@@ -113,4 +122,56 @@ func (p *Player) rotateCamera(yaw, pitch float32) {
 	direction.Z = r * float32(math.Cos(float64(theta))) * float32(math.Cos(float64(phi)))
 
 	p.Camera.Target = rl.Vector3Add(p.Camera.Position, direction)
+}
+
+// HandleBlockInteraction processes mouse input for block breaking and placing.
+// It returns a list of chunk coordinates that need to be re-meshed.
+func (p *Player) HandleBlockInteraction(w *world.World) []world.ChunkCoord {
+	// Handle inventory selection
+	mouseWheel := rl.GetMouseWheelMove()
+	if mouseWheel != 0 {
+		p.SelectedBlockIndex -= int(mouseWheel)
+		if p.SelectedBlockIndex < 0 {
+			p.SelectedBlockIndex = len(p.Inventory) - 1
+		} else if p.SelectedBlockIndex >= len(p.Inventory) {
+			p.SelectedBlockIndex = 0
+		}
+	}
+
+	// Raycast
+	dir := rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
+	dir = rl.Vector3Normalize(dir)
+
+	hit, pos, face, _ := w.Raycast(p.Camera.Position, dir, config.Current.PlayerArmLength)
+
+	p.HasTarget = hit
+	if hit {
+		p.TargetBlock = rl.NewVector3(float32(pos[0]), float32(pos[1]), float32(pos[2]))
+	} else {
+		return nil
+	}
+
+	// Mouse Input
+	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
+		// Break block
+		return w.SetBlock(pos[0], pos[1], pos[2], blocks.Air)
+	} else if rl.IsMouseButtonPressed(rl.MouseRightButton) {
+		// Place block
+		placePos := [3]int{pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]}
+		if len(p.Inventory) > 0 {
+			selectedBlock := p.Inventory[p.SelectedBlockIndex]
+
+			// Don't place inside the player
+			playerPos := p.Camera.Position
+			if int(math.Floor(float64(playerPos.X))) == placePos[0] &&
+				int(math.Floor(float64(playerPos.Y))) == placePos[1] &&
+				int(math.Floor(float64(playerPos.Z))) == placePos[2] {
+				return nil
+			}
+
+			return w.SetBlock(placePos[0], placePos[1], placePos[2], selectedBlock)
+		}
+	}
+
+	return nil
 }

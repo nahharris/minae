@@ -16,23 +16,25 @@ const (
 )
 
 type GameConfig struct {
-	ScreenWidth  int     `yaml:"screen_width"`
-	ScreenHeight int     `yaml:"screen_height"`
-	TargetFPS    int     `yaml:"target_fps"`
-	FOV          float32 `yaml:"fov"`
-	PlayerSpeed  float32 `yaml:"player_speed"`
-	MouseSens    float32 `yaml:"mouse_sens"`
+	ScreenWidth     int     `yaml:"screen_width"`
+	ScreenHeight    int     `yaml:"screen_height"`
+	TargetFPS       int     `yaml:"target_fps"`
+	FOV             float32 `yaml:"fov"`
+	PlayerSpeed     float32 `yaml:"player_speed"`
+	MouseSens       float32 `yaml:"mouse_sens"`
+	PlayerArmLength float32 `yaml:"player_arm_length"`
 }
 
 // DefaultConfig provides sensible defaults
 func DefaultConfig() GameConfig {
 	return GameConfig{
-		ScreenWidth:  1280,
-		ScreenHeight: 720,
-		TargetFPS:    60,
-		FOV:          60.0,
-		PlayerSpeed:  10.0,
-		MouseSens:    0.003,
+		ScreenWidth:     1280,
+		ScreenHeight:    720,
+		TargetFPS:       60,
+		FOV:             60.0,
+		PlayerSpeed:     10.0,
+		MouseSens:       0.003,
+		PlayerArmLength: 5.0,
 	}
 }
 

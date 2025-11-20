@@ -97,6 +97,30 @@ func (g *Game) Update() {
 		// Only update player if playing
 		dt := rl.GetFrameTime()
 		g.Player.Update(dt)
+
+		// Handle Block Interaction
+		affectedChunks := g.Player.HandleBlockInteraction(g.World)
+		for _, coord := range affectedChunks {
+			// Regenerate mesh for affected chunk
+			if chunk, exists := g.World.Chunks[coord]; exists {
+				// Unload old mesh
+				if oldMesh, ok := g.ChunkMeshes[coord]; ok {
+					rl.UnloadMesh(oldMesh)
+				}
+
+				newMesh := world.GenerateChunkMesh(chunk, g.World)
+				if newMesh != nil {
+					g.ChunkMeshes[coord] = newMesh
+					// Ensure material exists (it should)
+					if _, ok := g.ChunkMaterials[coord]; !ok {
+						g.ChunkMaterials[coord] = rl.LoadMaterialDefault()
+					}
+				} else {
+					// If mesh is nil (e.g. empty chunk), remove from map
+					delete(g.ChunkMeshes, coord)
+				}
+			}
+		}
 	}
 }
 
@@ -121,12 +145,26 @@ func (g *Game) Draw() {
 	// Draw Grid for reference
 	rl.DrawGrid(100, 1.0)
 
+	// Draw Selection Highlight
+	if g.Player.HasTarget {
+		// Draw a slightly larger wireframe cube around the target block
+		// TargetBlock is integer coordinates, so we can use it directly.
+		// We need to add 0.5 to center it, and size 1.005 to be slightly outside.
+		targetPos := rl.Vector3Add(g.Player.TargetBlock, rl.NewVector3(0.5, 0.5, 0.5))
+		rl.DrawCubeWires(targetPos, 1.05, 1.05, 1.05, rl.Black) // Inverted color logic is hard in Raylib simply, Black/White is good enough
+	}
+
 	rl.EndMode3D()
 
 	// UI
+	screenWidth := rl.GetScreenWidth()
+	screenHeight := rl.GetScreenHeight()
+
+	if g.State == StatePlaying {
+		g.UI.DrawHUD(screenWidth, screenHeight, g.Player)
+	}
+
 	if g.State == StatePaused {
-		screenWidth := rl.GetScreenWidth()
-		screenHeight := rl.GetScreenHeight()
 		resume, quit := g.UI.DrawPauseMenu(screenWidth, screenHeight)
 
 		if resume {

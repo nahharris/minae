@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
-
 
 // Registry manages all loaded block definitions.
 type Registry struct {
@@ -30,6 +30,23 @@ func Get(id string) *Block {
 	globalRegistry.mu.RLock()
 	defer globalRegistry.mu.RUnlock()
 	return globalRegistry.blocks[id]
+}
+
+// GetAll returns all registered blocks, sorted by ID.
+func GetAll() []*Block {
+	globalRegistry.mu.RLock()
+	defer globalRegistry.mu.RUnlock()
+
+	blocks := make([]*Block, 0, len(globalRegistry.blocks))
+	for _, b := range globalRegistry.blocks {
+		blocks = append(blocks, b)
+	}
+
+	sort.Slice(blocks, func(i, j int) bool {
+		return blocks[i].ID < blocks[j].ID
+	})
+
+	return blocks
 }
 
 // Register adds a block to the registry.

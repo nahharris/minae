@@ -84,3 +84,47 @@ func (w *World) GetBlock(x, y, z int) *blocks.Block {
 func (w *World) GetChunk(x, z int) *Chunk {
 	return w.Chunks[ChunkCoord{X: x, Z: z}]
 }
+
+// SetBlock sets the block type at the global world coordinates.
+// Returns a list of chunk coordinates that need to be re-meshed.
+func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
+	if y < 0 || y >= config.ChunkHeight {
+		return nil
+	}
+
+	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
+	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
+
+	localX := x - chunkX*config.ChunkWidth
+	localZ := z - chunkZ*config.ChunkWidth
+
+	coord := ChunkCoord{X: chunkX, Z: chunkZ}
+	chunk, exists := w.Chunks[coord]
+	if !exists {
+		return nil
+	}
+
+	if !chunk.SetBlock(localX, y, localZ, b) {
+		return nil
+	}
+
+	// List of chunks to update
+	affected := []ChunkCoord{coord}
+
+	// Check neighbors if on border
+	switch localX {
+	case 0:
+		affected = append(affected, ChunkCoord{X: chunkX - 1, Z: chunkZ})
+	case config.ChunkWidth - 1:
+		affected = append(affected, ChunkCoord{X: chunkX + 1, Z: chunkZ})
+	}
+
+	switch localZ {
+	case 0:
+		affected = append(affected, ChunkCoord{X: chunkX, Z: chunkZ - 1})
+	case config.ChunkWidth - 1:
+		affected = append(affected, ChunkCoord{X: chunkX, Z: chunkZ + 1})
+	}
+
+	return affected
+}
