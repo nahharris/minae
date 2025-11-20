@@ -27,9 +27,6 @@ func main() {
 		log.Printf("Warning: Failed to load config: %v. Using defaults.", err)
 	}
 
-	// 3. Register Vanilla Blocks
-	blocks.RegisterVanilla()
-
 	// 4. Load Custom/Override Blocks
 	if err := blocks.Load(dataFolder); err != nil {
 		log.Printf("Warning: Failed to load custom blocks: %v. Proceeding with vanilla only.", err)
