@@ -1,0 +1,40 @@
+---
+description: ENFORCED: Core architecture rules. Apply KISS, YAGNI, and SOLID to every change. Prioritize simplicity.
+globs: "**/*.go"
+alwaysApply: true
+---
+
+# Core Development Principles
+
+This project strictly adheres to **KISS**, **YAGNI**, and **SOLID** principles. As an AI, you must evaluate every code generation and modification against these rules.
+
+## 1. KISS (Keep It Simple, Stupid) - **Highest Priority**
+*   **Simplicity over Complexity:** Always choose the simplest solution that satisfies the functional requirement. If a solution feels "clever," it is likely wrong.
+*   **Clear Intent:** Code should be self-documenting. Variable and function names must be descriptive.
+*   **Minimize Abstractions:** Do not introduce layers of abstraction unless they solve a concrete, immediate problem.
+*   **Flat Structure:** Avoid deep nesting of conditionals and loops. Use guard clauses (early returns) to flatten logic.
+
+## 2. YAGNI (You Aren't Gonna Need It)
+*   **No Speculative Features:** Do not implement code for "future use cases." If it is not required by the current user prompt, **do not write it**.
+*   **Strict Scope:** Focus purely on the task at hand. Do not add "nice-to-haves."
+*   **Delete Unused Code:** If code becomes unreachable or obsolete during a refactor, remove it. Do not comment it out.
+
+## 3. SOLID Principles (Go Context)
+*   **Single Responsibility Principle (SRP):**
+    *   Functions and structs should do one thing and do it well.
+    *   If a function exceeds ~20-30 lines, consider breaking it down.
+*   **Open/Closed Principle (OCP):**
+    *   Design components that can be extended without modifying their source code (e.g., using Strategy pattern with interfaces).
+*   **Liskov Substitution Principle (LSP):**
+    *   Ensure implementations of an interface behave consistently. A user of an interface should not need to check the specific type of the implementation.
+*   **Interface Segregation Principle (ISP):**
+    *   **Define small interfaces.** In Go, interfaces should be defined where they are *used*, not where they are implemented.
+    *   Prefer single-method interfaces (like `io.Reader`) over large, monolithic ones.
+*   **Dependency Inversion Principle (DIP):**
+    *   Depend on abstractions (interfaces), not concrete types.
+    *   Use dependency injection to make code testable and loosely coupled.
+
+## AI Instructions for Code Generation
+1.  **Analyze First:** Before writing code, ask: "Is this the simplest way?" and "Is this strictly necessary?"
+2.  **Idiomatic Go:** Write "Effective Go." Handle errors explicitly. Use composition over inheritance.
+3.  **Refactoring:** When modifying existing code, leave it cleaner than you found it. If a function is complex, simplify it as part of the task.
