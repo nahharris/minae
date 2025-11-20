@@ -4,6 +4,7 @@ import (
 	"runtime"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/game"
 )
 
@@ -14,13 +15,17 @@ func init() {
 
 func main() {
 	// Initialize Window
-	rl.InitWindow(1280, 720, "Minae")
+	rl.InitWindow(
+		int32(config.Current.ScreenWidth),
+		int32(config.Current.ScreenHeight),
+		config.GameName,
+	)
 	defer rl.CloseWindow()
-	
+
 	// Disable ESC key closing the window (we handle it manually for Pause)
 	rl.SetExitKey(0)
 
-	rl.SetTargetFPS(60)
+	rl.SetTargetFPS(int32(config.Current.TargetFPS))
 	// Initial cursor state handled by Game
 
 	// Initialize Game

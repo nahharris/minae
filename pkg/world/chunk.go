@@ -1,10 +1,8 @@
 package world
 
-// ChunkWidth is the size of a chunk in X and Z dimensions.
-const ChunkWidth = 16
-
-// ChunkHeight is the size of a chunk in Y dimension.
-const ChunkHeight = 256
+import (
+	"github.com/nahharris/minae/pkg/config"
+)
 
 // BlockType represents the type of a voxel.
 type BlockType uint8
@@ -21,7 +19,7 @@ const (
 // Chunk represents a 16x16x256 section of the world.
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
-	Blocks [ChunkWidth * ChunkWidth * ChunkHeight]BlockType
+	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]BlockType
 	X, Z   int // Chunk coordinates in the world grid (not world position)
 }
 
@@ -38,7 +36,7 @@ func NewChunk(x, z int) *Chunk {
 // y: 0 to 255
 // Returns BlockAir if coordinates are out of bounds.
 func (c *Chunk) GetBlock(x, y, z int) BlockType {
-	if x < 0 || x >= ChunkWidth || y < 0 || y >= ChunkHeight || z < 0 || z >= ChunkWidth {
+	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
 		return BlockAir
 	}
 	index := c.getBlockIndex(x, y, z)
@@ -48,7 +46,7 @@ func (c *Chunk) GetBlock(x, y, z int) BlockType {
 // SetBlock sets the block type at the specified local coordinates.
 // Returns true if successful, false if coordinates are out of bounds.
 func (c *Chunk) SetBlock(x, y, z int, block BlockType) bool {
-	if x < 0 || x >= ChunkWidth || y < 0 || y >= ChunkHeight || z < 0 || z >= ChunkWidth {
+	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
@@ -59,6 +57,5 @@ func (c *Chunk) SetBlock(x, y, z int, block BlockType) bool {
 // getBlockIndex calculates the flat array index for 3D coordinates.
 // index = x + z*width + y*width*depth
 func (c *Chunk) getBlockIndex(x, y, z int) int {
-	return x + z*ChunkWidth + y*ChunkWidth*ChunkWidth
+	return x + z*config.ChunkWidth + y*config.ChunkWidth*config.ChunkWidth
 }
-

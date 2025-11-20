@@ -2,6 +2,7 @@ package world
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/config"
 )
 
 // ChunkMeshData holds the raw data for a chunk mesh.
@@ -64,7 +65,7 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 		vertices = append(vertices, fx+v1.X, fy+v1.Y, fz+v1.Z)
 		vertices = append(vertices, fx+v2.X, fy+v2.Y, fz+v2.Z)
 		vertices = append(vertices, fx+v3.X, fy+v3.Y, fz+v3.Z)
-		
+
 		// T2
 		vertices = append(vertices, fx+v1.X, fy+v1.Y, fz+v1.Z)
 		vertices = append(vertices, fx+v3.X, fy+v3.Y, fz+v3.Z)
@@ -79,15 +80,15 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 		for i := 0; i < 6; i++ {
 			colors = append(colors, color.R, color.G, color.B, color.A)
 		}
-		
+
 		// Texcoords (dummy for now)
 		texcoords = append(texcoords, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1)
 	}
 
 	// Loop through all blocks
-	for x := 0; x < ChunkWidth; x++ {
-		for y := 0; y < ChunkHeight; y++ {
-			for z := 0; z < ChunkWidth; z++ {
+	for x := range config.ChunkWidth {
+		for y := range config.ChunkHeight {
+			for z := range config.ChunkWidth {
 				block := chunk.GetBlock(x, y, z)
 				if block == BlockAir {
 					continue
@@ -95,16 +96,17 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 
 				// Determine color
 				var color rl.Color
-				if block == BlockStone {
+				switch block {
+				case BlockStone:
 					color = rl.Gray
-				} else if block == BlockDirt {
+				case BlockDirt:
 					color = rl.Brown
-				} else {
+				default:
 					color = rl.Pink
 				}
 
 				// Check neighbors
-				gx, gy, gz := chunk.X*ChunkWidth+x, y, chunk.Z*ChunkWidth+z
+				gx, gy, gz := chunk.X*config.ChunkWidth+x, y, chunk.Z*config.ChunkWidth+z
 
 				checkNeighbor := func(dx, dy, dz int, nx, ny, nz float32) {
 					neighbor := world.GetBlock(gx+dx, gy+dy, gz+dz)
@@ -113,7 +115,7 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 					}
 				}
 
-				checkNeighbor(0, 1, 0, 0, 1, 0)  // Top
+				checkNeighbor(0, 1, 0, 0, 1, 0)   // Top
 				checkNeighbor(0, -1, 0, 0, -1, 0) // Bottom
 				checkNeighbor(-1, 0, 0, -1, 0, 0) // Left
 				checkNeighbor(1, 0, 0, 1, 0, 0)   // Right

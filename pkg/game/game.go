@@ -2,6 +2,7 @@ package game
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/ui"
 	"github.com/nahharris/minae/pkg/world"
@@ -92,7 +93,7 @@ func (g *Game) Update() {
 		if !rl.IsCursorHidden() {
 			rl.DisableCursor()
 		}
-		
+
 		// Only update player if playing
 		dt := rl.GetFrameTime()
 		g.Player.Update(dt)
@@ -108,15 +109,15 @@ func (g *Game) Draw() {
 	rl.BeginMode3D(g.Player.Camera)
 
 	for coord, mesh := range g.ChunkMeshes {
-		pos := rl.NewVector3(float32(coord.X*world.ChunkWidth), 0, float32(coord.Z*world.ChunkWidth))
+		pos := rl.NewVector3(float32(coord.X*config.ChunkWidth), 0, float32(coord.Z*config.ChunkWidth))
 		rl.DrawMesh(*mesh, g.ChunkMaterials[coord], rl.MatrixTranslate(pos.X, pos.Y, pos.Z))
-		
+
 		// Debug: Draw Chunk Bounds
 		if g.UI.ShowDebug && g.UI.ShowAllUI {
 			rl.DrawCubeWires(rl.Vector3Add(pos, rl.NewVector3(8, 128, 8)), 16, 256, 16, rl.Red)
 		}
 	}
-	
+
 	// Draw Grid for reference
 	rl.DrawGrid(100, 1.0)
 
@@ -127,7 +128,7 @@ func (g *Game) Draw() {
 		screenWidth := rl.GetScreenWidth()
 		screenHeight := rl.GetScreenHeight()
 		resume, quit := g.UI.DrawPauseMenu(screenWidth, screenHeight)
-		
+
 		if resume {
 			g.State = StatePlaying
 		}

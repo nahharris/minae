@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/world"
 )
@@ -43,13 +44,13 @@ func (u *UIManager) DrawDebug(p *player.Player, w *world.World) {
 	y += spacing
 
 	// Chunk Coordinates
-	chunkX := int(math.Floor(float64(pos.X) / float64(world.ChunkWidth)))
-	chunkZ := int(math.Floor(float64(pos.Z) / float64(world.ChunkWidth)))
-	
+	chunkX := int(math.Floor(float64(pos.X) / float64(config.ChunkWidth)))
+	chunkZ := int(math.Floor(float64(pos.Z) / float64(config.ChunkWidth)))
+
 	// Local Coordinates within chunk (handle negative correctly)
-	localX := int(pos.X) - chunkX*world.ChunkWidth
-	localZ := int(pos.Z) - chunkZ*world.ChunkWidth
-	
+	localX := int(pos.X) - chunkX*config.ChunkWidth
+	localZ := int(pos.Z) - chunkZ*config.ChunkWidth
+
 	rl.DrawText(fmt.Sprintf("Chunk: %d, %d (Loc: %d, %d)", chunkX, chunkZ, localX, localZ), 10, y, fontSize, rl.White)
 	y += spacing
 
@@ -62,14 +63,15 @@ func (u *UIManager) DrawDebug(p *player.Player, w *world.World) {
 	screenWidth := int32(rl.GetScreenWidth())
 	panelWidth := int32(300)
 	panelX := screenWidth - panelWidth - 10
-	
+
 	rl.DrawRectangle(panelX, 5, panelWidth, 100, rl.Fade(rl.Black, 0.5))
-	
+
 	rightY := int32(10)
 	rl.DrawText(fmt.Sprintf("Go Runtime: %s", runtime.Version()), panelX+5, rightY, fontSize, rl.White)
 	rightY += spacing
 	rl.DrawText(fmt.Sprintf("OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH), panelX+5, rightY, fontSize, rl.White)
 	rightY += spacing
-	rl.DrawText(fmt.Sprintf("CPU: %d cores", runtime.NumCPU()), panelX+5, rightY, fontSize, rl.White)
+	rl.DrawText(fmt.Sprintf("Game Name: %s", config.GameName), panelX+5, rightY, fontSize, rl.White)
+	rightY += spacing
+	rl.DrawText(fmt.Sprintf("Version: %s", config.GameVersion), panelX+5, rightY, fontSize, rl.White)
 }
-

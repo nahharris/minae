@@ -4,13 +4,14 @@ import (
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/config"
 )
 
 // Player represents the first-person character in the game.
 // It handles camera movement and input processing.
 type Player struct {
-	Camera      rl.Camera3D
-	MovementSpeed float32
+	Camera           rl.Camera3D
+	MovementSpeed    float32
 	MouseSensitivity float32
 }
 
@@ -21,13 +22,13 @@ func NewPlayer(position rl.Vector3) *Player {
 	camera.Position = position
 	camera.Target = rl.Vector3Add(position, rl.NewVector3(1.0, 0.0, 0.0)) // Looking along +X
 	camera.Up = rl.NewVector3(0.0, 1.0, 0.0)
-	camera.Fovy = 60.0
+	camera.Fovy = config.Current.FOV
 	camera.Projection = rl.CameraPerspective
 
 	return &Player{
 		Camera:           camera,
-		MovementSpeed:    10.0, // Units per second
-		MouseSensitivity: 0.003,
+		MovementSpeed:    config.Current.PlayerSpeed,
+		MouseSensitivity: config.Current.MouseSens,
 	}
 }
 
@@ -36,12 +37,12 @@ func NewPlayer(position rl.Vector3) *Player {
 func (p *Player) Update(dt float32) {
 	// Mouse input for looking around
 	mouseDelta := rl.GetMouseDelta()
-	
+
 	// Raylib Camera update mode only works if we use UpdateCamera.
 	// However, for custom FPS control, we might want to manipulate target/position directly.
 	// For simplicity and "fly mode", we can use rl.UpdateCameraPro or manual calculation.
 	// Let's implement manual calculation for clarity and control.
-	
+
 	// Rotate the camera based on mouse movement
 	p.rotateCamera(-mouseDelta.X*p.MouseSensitivity, -mouseDelta.Y*p.MouseSensitivity)
 
@@ -49,7 +50,7 @@ func (p *Player) Update(dt float32) {
 	var forward = rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
 	forward.Y = 0 // Keep movement horizontal for now (except space/ctrl)
 	forward = rl.Vector3Normalize(forward)
-	
+
 	var right = rl.Vector3CrossProduct(forward, p.Camera.Up)
 	right = rl.Vector3Normalize(right)
 
@@ -88,7 +89,7 @@ func (p *Player) Update(dt float32) {
 func (p *Player) rotateCamera(yaw, pitch float32) {
 	// Vector from position to target
 	direction := rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
-	
+
 	// Convert to spherical coordinates
 	r := rl.Vector3Length(direction)
 	theta := float32(math.Atan2(float64(direction.X), float64(direction.Z)))
@@ -113,4 +114,3 @@ func (p *Player) rotateCamera(yaw, pitch float32) {
 
 	p.Camera.Target = rl.Vector3Add(p.Camera.Position, direction)
 }
-
