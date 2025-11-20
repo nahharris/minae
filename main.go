@@ -1,9 +1,11 @@
 package main
 
 import (
+	"log"
 	"runtime"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/game"
 )
@@ -14,6 +16,25 @@ func init() {
 }
 
 func main() {
+	// 1. Bootstrap Data Folder (Create if missing)
+	dataFolder, err := config.BootstrapDataFolder()
+	if err != nil {
+		log.Fatalf("Failed to bootstrap data folder: %v", err)
+	}
+
+	// 2. Load Config (Write defaults if missing)
+	if err := config.Load(dataFolder); err != nil {
+		log.Printf("Warning: Failed to load config: %v. Using defaults.", err)
+	}
+
+	// 3. Register Vanilla Blocks
+	blocks.RegisterVanilla()
+
+	// 4. Load Custom/Override Blocks
+	if err := blocks.Load(dataFolder); err != nil {
+		log.Printf("Warning: Failed to load custom blocks: %v. Proceeding with vanilla only.", err)
+	}
+
 	// Initialize Window
 	rl.InitWindow(
 		int32(config.Current.ScreenWidth),
