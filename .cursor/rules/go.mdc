@@ -1,0 +1,60 @@
+---
+alwaysApply: true
+description: "General guidelines for Go code, including best practices, formatting, linting, and testing."
+globs: ["**/*.go"]
+---
+
+# Go Development Rules
+
+Follow these guidelines to write idiomatic, maintainable, and efficient Go code.
+
+## 1. Code Style & Formatting
+
+*   **Formatting:** All code must be formatted with `gofmt`.
+*   **Naming:**
+    *   Use `CamelCase` for exported identifiers and `camelCase` for unexported ones.
+    *   Keep variable names short but descriptive (e.g., `i` for loop index, `user` for a User struct).
+    *   Acronyms should be all caps (e.g., `ServeHTTP`, `IDProcessor`).
+*   **Comments:**
+    *   Exported functions and types must have documentation comments.
+    *   Comments should be full sentences starting with the function/type name.
+
+## 2. Best Practices
+
+*   **Error Handling:**
+    *   Handle errors explicitly. Do not ignore errors with `_`.
+    *   Return errors as the last return value.
+    *   Use `errors.Is` and `errors.As` for error checking.
+    *   Wrap errors with `fmt.Errorf("%w", err)` to provide context.
+*   **Concurrency:**
+    *   Use channels for communication, mutexes for state synchronization.
+    *   Avoid goroutine leaks; ensure they can be stopped (e.g., via `context.Context`).
+    *   Don't expose concurrency in APIs if possible (synchronous APIs are easier to use).
+*   **Interfaces:**
+    *   Accept interfaces, return structs.
+    *   Define interfaces where they are used, not where they are implemented.
+    *   Keep interfaces small (single responsibility).
+*   **Simplicity:**
+    *   Avoid deep nesting. Use guard clauses to return early.
+    *   Make the zero value useful whenever possible.
+
+## 3. Linting
+
+*   Use `golangci-lint` as the standard linter.
+*   Address all linter warnings.
+*   Common linters to enable: `errcheck`, `gosimple`, `govet`, `ineffassign`, `staticcheck`, `unused`.
+
+## 4. Testing
+
+*   **Structure:** Use table-driven tests for comprehensive coverage of cases.
+*   **Naming:** Test functions should be named `TestFunctionName`.
+*   **Parallelism:** Use `t.Parallel()` for independent tests to speed up execution.
+*   **Assertions:** prefer standard `if got != want` patterns or use a lightweight assertion library if permitted (but standard library is preferred for simplicity).
+*   **Coverage:** Aim for high test coverage, but prioritize critical logic.
+*   **Subtests:** Use `t.Run` to organize subtests within a table-driven test.
+
+## 5. Package Organization
+
+*   Keep `main` packages small.
+*   Organize code by domain/feature rather than technical layer (e.g., `player`, `world` instead of `models`, `controllers`).
+*   Avoid circular dependencies.

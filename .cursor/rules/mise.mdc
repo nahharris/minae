@@ -1,0 +1,32 @@
+---
+alwaysApply: true
+description: "Enforce usage of mise for tool version management, specifically for Go."
+globs: ["mise.toml", "go.mod", "**/*.go"]
+---
+
+# Mise Tool Management
+
+This project uses [mise](https://mise.jdx.dev/) to manage tool versions.
+
+## 1. Source of Truth
+
+*   `mise.toml` is the single source of truth for tool versions (Go, golangci-lint, etc.).
+*   Ensure the active Go version matches the version specified in `mise.toml`.
+
+## 2. Verification
+
+*   When starting a session or encountering version-related errors, verify the environment:
+    *   Check `mise.toml` for the required Go version.
+    *   Ensure the shell environment is using the correct version (e.g., `go version` should match).
+*   If tools are missing or versions are incorrect, assume `mise install` needs to be run.
+
+## 3. Go Version
+
+*   The `go` directive in `go.mod` should be compatible with the version defined in `mise.toml`.
+*   Use the `mise` provided `go` binary for all Go commands to ensure consistency.
+
+## 4. Command Execution
+
+*   **ALWAYS** use `mise exec --` (or `mise x --`) to run commands. This ensures the command runs within the correct `mise` environment with the specified tool versions, regardless of the current shell state.
+    *   Correct: `mise exec -- go test ./...`
+    *   Correct: `mise exec -- golangci-lint run`
