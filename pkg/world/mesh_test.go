@@ -2,19 +2,25 @@ package world
 
 import (
 	"testing"
+
+	"github.com/nahharris/minae/pkg/blocks"
 )
 
 func TestCalculateChunkMesh_Culling(t *testing.T) {
+	blocks.Reset()
+	stone := &blocks.Block{ID: blocks.Stone, Name: "Stone", Color: 0xFFFFFFFF}
+	blocks.Register(stone)
+
 	w := NewWorld()
 	c := NewChunk(0, 0)
 	w.Chunks[ChunkCoord{0, 0}] = c
 
 	// Place a single block at 8,8,8
 	// It should have all 6 faces visible (since neighbors are air)
-	c.SetBlock(8, 8, 8, BlockStone)
+	c.SetBlock(8, 8, 8, stone)
 
 	data := CalculateChunkMesh(c, w)
-	
+
 	if data == nil {
 		t.Fatal("Expected mesh data, got nil")
 	}
@@ -26,11 +32,11 @@ func TestCalculateChunkMesh_Culling(t *testing.T) {
 	}
 
 	// Now place a block on top (8,9,8)
-	c.SetBlock(8, 9, 8, BlockStone)
-	
+	c.SetBlock(8, 9, 8, stone)
+
 	// Recalculate
 	data = CalculateChunkMesh(c, w)
-	
+
 	// Bottom block (8,8,8): Top face hidden. 5 faces.
 	// Top block (8,9,8): Bottom face hidden. 5 faces.
 	// Total 10 faces * 6 verts = 60 vertices.
@@ -44,10 +50,9 @@ func TestCalculateChunkMesh_Empty(t *testing.T) {
 	w := NewWorld()
 	c := NewChunk(0, 0)
 	w.Chunks[ChunkCoord{0, 0}] = c
-	
+
 	data := CalculateChunkMesh(c, w)
 	if data != nil {
 		t.Error("Expected nil mesh for empty chunk")
 	}
 }
-

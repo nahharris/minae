@@ -3,6 +3,7 @@ package world
 import (
 	"math"
 
+	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
 )
 
@@ -38,6 +39,13 @@ func (w *World) GenerateFixedGrid() {
 
 // fillChunkDebug fills the chunk with random noise for testing.
 func (w *World) fillChunkDebug(c *Chunk) {
+	stone := blocks.Get(blocks.Stone)
+	dirt := blocks.Get(blocks.Dirt)
+
+	// If blocks are not loaded yet (during tests?), fallback or panic?
+	// For safety, let's just skip if nil, but this will result in air.
+	// But since we bootstrap before this call in main, it should be fine.
+
 	for x := range config.ChunkWidth {
 		for z := range config.ChunkWidth {
 			// Simple terrain height
@@ -45,9 +53,9 @@ func (w *World) fillChunkDebug(c *Chunk) {
 			// Let's just fill up to 32 for solid ground
 			for y := 0; y < height; y++ {
 				if y < height-3 {
-					c.SetBlock(x, y, z, BlockStone)
+					c.SetBlock(x, y, z, stone)
 				} else {
-					c.SetBlock(x, y, z, BlockDirt)
+					c.SetBlock(x, y, z, dirt)
 				}
 			}
 		}
@@ -55,7 +63,7 @@ func (w *World) fillChunkDebug(c *Chunk) {
 }
 
 // GetBlock returns the block type at the global world coordinates.
-func (w *World) GetBlock(x, y, z int) BlockType {
+func (w *World) GetBlock(x, y, z int) *blocks.Block {
 	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
 	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
 
@@ -68,7 +76,7 @@ func (w *World) GetBlock(x, y, z int) BlockType {
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
-		return BlockAir
+		return nil
 	}
 	return chunk.GetBlock(localX, y, localZ)
 }

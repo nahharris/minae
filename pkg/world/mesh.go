@@ -2,6 +2,7 @@ package world
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
 )
 
@@ -90,27 +91,21 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 		for y := range config.ChunkHeight {
 			for z := range config.ChunkWidth {
 				block := chunk.GetBlock(x, y, z)
-				if block == BlockAir {
+				// Treat nil or blocks with "air" ID as transparent/non-visible
+				if block == nil || isAir(block) {
 					continue
 				}
 
-				// Determine color
-				var color rl.Color
-				switch block {
-				case BlockStone:
-					color = rl.Gray
-				case BlockDirt:
-					color = rl.Brown
-				default:
-					color = rl.Pink
-				}
+				// Determine color from block definition
+				color := rl.GetColor(uint(block.Color))
 
 				// Check neighbors
 				gx, gy, gz := chunk.X*config.ChunkWidth+x, y, chunk.Z*config.ChunkWidth+z
 
 				checkNeighbor := func(dx, dy, dz int, nx, ny, nz float32) {
 					neighbor := world.GetBlock(gx+dx, gy+dy, gz+dz)
-					if neighbor == BlockAir {
+					// If neighbor is air (or nil), we draw the face
+					if neighbor == nil || isAir(neighbor) {
 						addFace(x, y, z, rl.NewVector3(nx, ny, nz), color)
 					}
 				}
@@ -135,6 +130,11 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 		Normals:   normals,
 		Colors:    colors,
 	}
+}
+
+// isAir checks if a block is essentially air
+func isAir(b *blocks.Block) bool {
+	return b == nil || b.ID == "minae/air" || b.Name == "Air"
 }
 
 // GenerateChunkMesh generates and uploads a Raylib mesh.

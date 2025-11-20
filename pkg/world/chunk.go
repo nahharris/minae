@@ -1,43 +1,40 @@
 package world
 
 import (
+	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
-)
-
-// BlockType represents the type of a voxel.
-type BlockType uint8
-
-const (
-	// BlockAir represents an empty block.
-	BlockAir BlockType = iota
-	// BlockStone represents a stone block.
-	BlockStone
-	// BlockDirt represents a dirt block.
-	BlockDirt
 )
 
 // Chunk represents a 16x16x256 section of the world.
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
-	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]BlockType
+	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]*blocks.Block
 	X, Z   int // Chunk coordinates in the world grid (not world position)
 }
 
 // NewChunk creates a new Chunk at the specified grid coordinates.
 func NewChunk(x, z int) *Chunk {
-	return &Chunk{
+	c := &Chunk{
 		X: x,
 		Z: z,
 	}
+	// Initialize with Air (assuming air is nil or a specific block)
+	// If we want explicit air blocks, we should set them here.
+	// For now, let's assume nil means "Air" or default, but better to be explicit if possible.
+	// However, since we are using pointers, nil is a valid state for "nothing".
+	// But "Air" is usually a block type. Let's try to use the "minae/air" block if available,
+	// or handle nil as air.
+	// For safety, let's fill with nil and handle nil as Air in GetBlock.
+	return c
 }
 
 // GetBlock returns the block type at the specified local coordinates.
 // x, z: 0 to 15
 // y: 0 to 255
-// Returns BlockAir if coordinates are out of bounds.
-func (c *Chunk) GetBlock(x, y, z int) BlockType {
+// Returns nil (Air) if coordinates are out of bounds or block is nil.
+func (c *Chunk) GetBlock(x, y, z int) *blocks.Block {
 	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
-		return BlockAir
+		return nil
 	}
 	index := c.getBlockIndex(x, y, z)
 	return c.Blocks[index]
@@ -45,7 +42,7 @@ func (c *Chunk) GetBlock(x, y, z int) BlockType {
 
 // SetBlock sets the block type at the specified local coordinates.
 // Returns true if successful, false if coordinates are out of bounds.
-func (c *Chunk) SetBlock(x, y, z int, block BlockType) bool {
+func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
 		return false
 	}
