@@ -39,9 +39,6 @@ func (w *World) GenerateFixedGrid() {
 
 // fillChunkDebug fills the chunk with random noise for testing.
 func (w *World) fillChunkDebug(c *Chunk) {
-	stone := blocks.Get(blocks.Stone)
-	dirt := blocks.Get(blocks.Dirt)
-
 	// If blocks are not loaded yet (during tests?), fallback or panic?
 	// For safety, let's just skip if nil, but this will result in air.
 	// But since we bootstrap before this call in main, it should be fine.
@@ -53,9 +50,11 @@ func (w *World) fillChunkDebug(c *Chunk) {
 			// Let's just fill up to 32 for solid ground
 			for y := 0; y < height; y++ {
 				if y < height-3 {
-					c.SetBlock(x, y, z, stone)
+					c.SetBlock(x, y, z, blocks.Stone)
+				} else if y < height-1 {
+					c.SetBlock(x, y, z, blocks.Dirt)
 				} else {
-					c.SetBlock(x, y, z, dirt)
+					c.SetBlock(x, y, z, blocks.Grass)
 				}
 			}
 		}

@@ -8,7 +8,7 @@ import (
 
 func TestCalculateChunkMesh_Culling(t *testing.T) {
 	blocks.Reset()
-	stone := &blocks.Block{ID: blocks.Stone, Name: "Stone", Color: 0xFFFFFFFF}
+	stone := blocks.Stone
 	blocks.Register(stone)
 
 	w := NewWorld()
