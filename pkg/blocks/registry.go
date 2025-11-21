@@ -14,15 +14,25 @@ import (
 // Registry manages all loaded block definitions.
 type Registry struct {
 	blocks map[string]*Block
+	ids    map[string]NumID
+	byID   []*Block
+	nextID NumID
 	mu     sync.RWMutex
 }
 
 var (
 	// Global registry instance
-	globalRegistry = &Registry{
-		blocks: make(map[string]*Block),
-	}
+	globalRegistry = newRegistry()
 )
+
+func newRegistry() *Registry {
+	return &Registry{
+		blocks: make(map[string]*Block),
+		ids:    make(map[string]NumID),
+		byID:   make([]*Block, 1), // Index 0 reserved for air/empty
+		nextID: 1,
+	}
+}
 
 // Get returns a block definition by ID.
 // Returns nil if not found.
@@ -53,7 +63,21 @@ func GetAll() []*Block {
 func Register(b *Block) *Block {
 	globalRegistry.mu.Lock()
 	defer globalRegistry.mu.Unlock()
+
+	if existing, ok := globalRegistry.blocks[b.ID]; ok {
+		existing.Name = b.Name
+		existing.Color = b.Color
+		return existing
+	}
+
+	id := globalRegistry.allocateID(b.ID)
+	b.numericID = id
+
 	globalRegistry.blocks[b.ID] = b
+	globalRegistry.ids[b.ID] = id
+	globalRegistry.ensureByIDCapacity(id)
+	globalRegistry.byID[id] = b
+
 	return b
 }
 
@@ -61,7 +85,34 @@ func Register(b *Block) *Block {
 func Reset() {
 	globalRegistry.mu.Lock()
 	defer globalRegistry.mu.Unlock()
+
+	for _, b := range globalRegistry.blocks {
+		b.numericID = InvalidNumericID
+	}
+
 	globalRegistry.blocks = make(map[string]*Block)
+	globalRegistry.ids = make(map[string]NumID)
+	globalRegistry.byID = make([]*Block, 1)
+	globalRegistry.nextID = 1
+}
+
+func (r *Registry) allocateID(blockID string) NumID {
+	if blockID == airBlockID {
+		return InvalidNumericID
+	}
+	id := r.nextID
+	r.nextID++
+	return id
+}
+
+func (r *Registry) ensureByIDCapacity(id NumID) {
+	idx := int(id)
+	if idx < len(r.byID) {
+		return
+	}
+	newByID := make([]*Block, idx+1)
+	copy(newByID, r.byID)
+	r.byID = newByID
 }
 
 // Load recursively walks the blocks directory and loads all YAML definitions.
@@ -116,4 +167,39 @@ func Load(dataFolder string) error {
 	})
 
 	return err
+}
+
+// NumericIDOf returns the compact numeric ID for the given block (or InvalidNumericID if nil/air).
+func NumericIDOf(b *Block) NumID {
+	if b == nil || b.ID == airBlockID {
+		return InvalidNumericID
+	}
+	if b.numericID != InvalidNumericID {
+		return b.numericID
+	}
+
+	globalRegistry.mu.RLock()
+	defer globalRegistry.mu.RUnlock()
+
+	if id, ok := globalRegistry.ids[b.ID]; ok {
+		b.numericID = id
+		return id
+	}
+	return InvalidNumericID
+}
+
+// FromNumericID returns the registered block for the given numeric ID.
+// InvalidNumericID returns nil (air).
+func FromNumericID(id NumID) *Block {
+	if id == InvalidNumericID {
+		return nil
+	}
+
+	globalRegistry.mu.RLock()
+	defer globalRegistry.mu.RUnlock()
+
+	if idx := int(id); idx < len(globalRegistry.byID) {
+		return globalRegistry.byID[idx]
+	}
+	return nil
 }

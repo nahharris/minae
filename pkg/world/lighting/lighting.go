@@ -32,22 +32,23 @@ func lerpFloat(f1, f2 float32, t float32) float32 {
 	return f1 + (f2-f1)*t
 }
 
-// Lerp returns a new DayState interpolated between s and it's next state by t (0.0 to 1.0)
-func (s *DayState) Lerp(hour float32) *DayState {
+// LerpColors interpolates the colors between this state and the next state at the provided hour.
+func (s *DayState) LerpColors(hour float32) (sky, sun, ambient rl.Color, intensity float32) {
 	if s.NextState == nil {
-		return s
+		return s.SkyColor, s.SunColor, s.AmbientColor, s.SunIntensity
 	}
 
-	t := (hour - s.PeakTime) / (s.NextState.PeakTime - s.PeakTime)
-	target := s.NextState
-	return &DayState{
-		SkyColor:     lerpColor(s.SkyColor, target.SkyColor, t),
-		SunColor:     lerpColor(s.SunColor, target.SunColor, t),
-		AmbientColor: lerpColor(s.AmbientColor, target.AmbientColor, t),
-		SunIntensity: lerpFloat(s.SunIntensity, target.SunIntensity, t),
-		PeakTime:     lerpFloat(s.PeakTime, target.PeakTime, t),
-		NextState:    s.NextState,
+	next := s.NextState
+	den := next.PeakTime - s.PeakTime
+	if den == 0 {
+		return next.SkyColor, next.SunColor, next.AmbientColor, next.SunIntensity
 	}
+
+	t := (hour - s.PeakTime) / den
+	return lerpColor(s.SkyColor, next.SkyColor, t),
+		lerpColor(s.SunColor, next.SunColor, t),
+		lerpColor(s.AmbientColor, next.AmbientColor, t),
+		lerpFloat(s.SunIntensity, next.SunIntensity, t)
 }
 
 var (
@@ -142,10 +143,8 @@ func (m *Manager) GetState() (skyColor, lightColor, ambientColor rl.Color, light
 	// Map time to 0-24 hour scale for easier reasoning
 	hour := (m.Time / m.CycleDuration)
 
-	lerpedState := getStateFromTime(hour).Lerp(hour)
-	skyColor = lerpedState.SkyColor
-	lightColor = lerpedState.SunColor
-	ambientColor = lerpedState.AmbientColor
+	state := getStateFromTime(hour)
+	skyColor, lightColor, ambientColor, _ = state.LerpColors(hour)
 	// Calculate Sun Direction
 	// Angle 0 at 6am.
 	angle := hour * 2.0 * math.Pi

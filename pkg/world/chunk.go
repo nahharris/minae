@@ -8,8 +8,10 @@ import (
 // Chunk represents a 16x16x256 section of the world.
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
-	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]*blocks.Block
+	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]blocks.NumID
 	X, Z   int // Chunk coordinates in the world grid (not world position)
+
+	meshHint chunkMeshHint
 }
 
 // NewChunk creates a new Chunk at the specified grid coordinates.
@@ -37,7 +39,7 @@ func (c *Chunk) GetBlock(x, y, z int) *blocks.Block {
 		return nil
 	}
 	index := c.getBlockIndex(x, y, z)
-	return c.Blocks[index]
+	return blocks.FromNumericID(c.Blocks[index])
 }
 
 // SetBlock sets the block type at the specified local coordinates.
@@ -47,7 +49,7 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
-	c.Blocks[index] = block
+	c.Blocks[index] = blocks.NumericIDOf(block)
 	return true
 }
 
@@ -55,4 +57,11 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 // index = x + z*width + y*width*depth
 func (c *Chunk) getBlockIndex(x, y, z int) int {
 	return x + z*config.ChunkWidth + y*config.ChunkWidth*config.ChunkWidth
+}
+
+type chunkMeshHint struct {
+	vertices  int
+	texcoords int
+	normals   int
+	colors    int
 }

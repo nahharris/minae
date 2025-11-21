@@ -35,6 +35,12 @@ type Game struct {
 	LocLightColor int32
 	LocAmbient    int32
 	LocViewPos    int32
+
+	// Reusable shader value buffers to avoid per-frame allocations.
+	shaderLightDir   []float32
+	shaderLightColor []float32
+	shaderAmbient    []float32
+	shaderViewPos    []float32
 }
 
 // NewGame initializes the game systems.
@@ -67,19 +73,23 @@ func NewGame() *Game {
 	mat.Shader = shader
 
 	g := &Game{
-		Player:        p,
-		World:         w,
-		UI:            u,
-		State:         StatePlaying,
-		ChunkMeshes:   make(map[world.ChunkCoord]*rl.Mesh),
-		Running:       true,
-		Lighting:      l,
-		Shader:        shader,
-		ChunkMaterial: mat,
-		LocLightDir:   locLightDir,
-		LocLightColor: locLightColor,
-		LocAmbient:    locAmbient,
-		LocViewPos:    locViewPos,
+		Player:           p,
+		World:            w,
+		UI:               u,
+		State:            StatePlaying,
+		ChunkMeshes:      make(map[world.ChunkCoord]*rl.Mesh),
+		Running:          true,
+		Lighting:         l,
+		Shader:           shader,
+		ChunkMaterial:    mat,
+		LocLightDir:      locLightDir,
+		LocLightColor:    locLightColor,
+		LocAmbient:       locAmbient,
+		LocViewPos:       locViewPos,
+		shaderLightDir:   make([]float32, 3),
+		shaderLightColor: make([]float32, 4),
+		shaderAmbient:    make([]float32, 4),
+		shaderViewPos:    make([]float32, 3),
 	}
 
 	g.generateMeshes()
@@ -162,19 +172,31 @@ func (g *Game) Draw() {
 
 	rl.ClearBackground(skyColor)
 
-	// Set Shader Values
-	// Raylib Go wrappers for SetShaderValue are a bit specific.
-	// We need to pass slice of float32.
-	rl.SetShaderValue(g.Shader, g.LocLightDir, []float32{lightDir.X, lightDir.Y, lightDir.Z}, rl.ShaderUniformVec3)
+	// Set Shader Values using reusable buffers to avoid per-frame allocations.
+	g.shaderLightDir[0] = lightDir.X
+	g.shaderLightDir[1] = lightDir.Y
+	g.shaderLightDir[2] = lightDir.Z
+	rl.SetShaderValue(g.Shader, g.LocLightDir, g.shaderLightDir, rl.ShaderUniformVec3)
 
 	lc := rl.ColorNormalize(lightColor)
-	rl.SetShaderValue(g.Shader, g.LocLightColor, []float32{lc.X, lc.Y, lc.Z, lc.W}, rl.ShaderUniformVec4)
+	g.shaderLightColor[0] = lc.X
+	g.shaderLightColor[1] = lc.Y
+	g.shaderLightColor[2] = lc.Z
+	g.shaderLightColor[3] = lc.W
+	rl.SetShaderValue(g.Shader, g.LocLightColor, g.shaderLightColor, rl.ShaderUniformVec4)
 
 	ac := rl.ColorNormalize(ambientColor)
-	rl.SetShaderValue(g.Shader, g.LocAmbient, []float32{ac.X, ac.Y, ac.Z, ac.W}, rl.ShaderUniformVec4)
+	g.shaderAmbient[0] = ac.X
+	g.shaderAmbient[1] = ac.Y
+	g.shaderAmbient[2] = ac.Z
+	g.shaderAmbient[3] = ac.W
+	rl.SetShaderValue(g.Shader, g.LocAmbient, g.shaderAmbient, rl.ShaderUniformVec4)
 
 	camPos := g.Player.Camera.Position
-	rl.SetShaderValue(g.Shader, g.LocViewPos, []float32{camPos.X, camPos.Y, camPos.Z}, rl.ShaderUniformVec3)
+	g.shaderViewPos[0] = camPos.X
+	g.shaderViewPos[1] = camPos.Y
+	g.shaderViewPos[2] = camPos.Z
+	rl.SetShaderValue(g.Shader, g.LocViewPos, g.shaderViewPos, rl.ShaderUniformVec3)
 
 	// 3D World
 	rl.BeginMode3D(g.Player.Camera)

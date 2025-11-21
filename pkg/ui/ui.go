@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"runtime"
+
 	"github.com/nahharris/minae/minui"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/world"
@@ -26,6 +28,27 @@ type UIManager struct {
 	// Pause menu interaction state
 	ResumeClicked bool
 	QuitClicked   bool
+
+	// Cached debug strings to avoid per-frame allocations
+	debugFPS        string
+	debugTime       string
+	debugAlloc      string
+	debugTotalAlloc string
+	debugSys        string
+	debugXYZ        string
+	debugChunk      string
+	debugDir        string
+	// Cached values to detect changes
+	cachedFPS        int
+	cachedTime       string
+	cachedAlloc      uint64
+	cachedTotalAlloc uint64
+	cachedSys        uint64
+	cachedXYZ        [3]float32
+	cachedChunk      [4]int
+	cachedDir        [3]float32
+
+	memStats runtime.MemStats
 }
 
 // NewUIManager creates a new UIManager.
@@ -41,4 +64,8 @@ func NewUIManager(p *player.Player, w *world.World, l *lighting.Manager) *UIMana
 	u.initDebug()
 	u.initPauseMenu()
 	return u
+}
+
+func (u *UIManager) captureMemStats() {
+	runtime.ReadMemStats(&u.memStats)
 }
