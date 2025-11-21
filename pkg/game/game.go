@@ -1,8 +1,6 @@
 package game
 
 import (
-	"fmt"
-
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/player"
@@ -49,12 +47,12 @@ func NewGame() *Game {
 	w := world.NewWorld()
 	w.GenerateFixedGrid()
 
-	// Initialize UI
-	u := ui.NewUIManager()
-
 	// Initialize Lighting
 	l := lighting.NewManager()
 	shader := rl.LoadShaderFromMemory(lighting.VsCode, lighting.FsCode)
+
+	// Initialize UI
+	u := ui.NewUIManager(p, w, l)
 
 	// Get Shader Locations
 	// Standard locations are set automatically by LoadShader if names match standard Raylib names.
@@ -200,7 +198,7 @@ func (g *Game) Draw() {
 		// TargetBlock is integer coordinates, so we can use it directly.
 		// We need to add 0.5 to center it, and size 1.005 to be slightly outside.
 		targetPos := rl.Vector3Add(g.Player.TargetBlock, rl.NewVector3(0.5, 0.5, 0.5))
-		rl.DrawCubeWires(targetPos, 1.05, 1.05, 1.05, rl.Black)
+		rl.DrawCubeWires(targetPos, 1.01, 1.01, 1.01, rl.Black)
 	}
 
 	rl.EndMode3D()
@@ -210,7 +208,7 @@ func (g *Game) Draw() {
 	screenHeight := rl.GetScreenHeight()
 
 	if g.State == StatePlaying {
-		g.UI.DrawHUD(screenWidth, screenHeight, g.Player)
+		g.UI.DrawHUD(screenWidth, screenHeight)
 	}
 
 	if g.State == StatePaused {
@@ -226,18 +224,10 @@ func (g *Game) Draw() {
 
 	// Debug Overlay
 	if g.UI.ShowDebug {
-		timeStr := timeToString(g.Lighting.Time, g.Lighting.CycleDuration)
-		g.UI.DrawDebug(g.Player, g.World, timeStr)
+		g.UI.DrawDebug()
 	}
 
 	rl.EndDrawing()
-}
-
-// Helper to format time
-func timeToString(time, duration float32) string {
-	hour := int((time / duration) * 24.0)
-	minute := int(((time/duration)*24.0 - float32(hour)) * 60.0)
-	return fmt.Sprintf("%02d:%02d", hour, minute)
 }
 
 // Unload cleans up resources.
