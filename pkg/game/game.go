@@ -29,6 +29,7 @@ type Game struct {
 	Lighting      *lighting.Manager
 	Shader        rl.Shader
 	ChunkMaterial rl.Material
+	MeshBuffer    *world.MeshBuffer
 
 	// Shader Locations
 	LocLightDir   int32
@@ -76,6 +77,7 @@ func NewGame() *Game {
 		Lighting:      l,
 		Shader:        shader,
 		ChunkMaterial: mat,
+		MeshBuffer:    &world.MeshBuffer{},
 		LocLightDir:   locLightDir,
 		LocLightColor: locLightColor,
 		LocAmbient:    locAmbient,
@@ -90,7 +92,7 @@ func NewGame() *Game {
 // generateMeshes generates meshes for all chunks in the world.
 func (g *Game) generateMeshes() {
 	for coord, chunk := range g.World.Chunks {
-		mesh := world.GenerateChunkMesh(chunk, g.World)
+		mesh := world.GenerateChunkMesh(chunk, g.World, g.MeshBuffer)
 		if mesh != nil {
 			g.ChunkMeshes[coord] = mesh
 		}
@@ -141,7 +143,7 @@ func (g *Game) Update() {
 					rl.UnloadMesh(oldMesh)
 				}
 
-				newMesh := world.GenerateChunkMesh(chunk, g.World)
+				newMesh := world.GenerateChunkMesh(chunk, g.World, g.MeshBuffer)
 				if newMesh != nil {
 					g.ChunkMeshes[coord] = newMesh
 				} else {

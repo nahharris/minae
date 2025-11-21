@@ -8,7 +8,7 @@ import (
 // Chunk represents a 16x16x256 section of the world.
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
-	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]*blocks.Block
+	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint16
 	X, Z   int // Chunk coordinates in the world grid (not world position)
 }
 
@@ -31,13 +31,13 @@ func NewChunk(x, z int) *Chunk {
 // GetBlock returns the block type at the specified local coordinates.
 // x, z: 0 to 15
 // y: 0 to 255
-// Returns nil (Air) if coordinates are out of bounds or block is nil.
+// Returns nil (Air) if coordinates are out of bounds.
 func (c *Chunk) GetBlock(x, y, z int) *blocks.Block {
 	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
 		return nil
 	}
 	index := c.getBlockIndex(x, y, z)
-	return c.Blocks[index]
+	return blocks.GetByID(c.Blocks[index])
 }
 
 // SetBlock sets the block type at the specified local coordinates.
@@ -47,7 +47,11 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
-	c.Blocks[index] = block
+	if block == nil {
+		c.Blocks[index] = 0 // Default to Air (ID 0)
+	} else {
+		c.Blocks[index] = block.NumID
+	}
 	return true
 }
 
