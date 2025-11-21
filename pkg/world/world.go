@@ -80,6 +80,36 @@ func (w *World) GetBlock(x, y, z int) *blocks.Block {
 	return chunk.GetBlock(localX, y, localZ)
 }
 
+// GetLight returns the light level at the global world coordinates.
+func (w *World) GetLight(x, y, z int) uint8 {
+	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
+	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
+
+	localX := x - chunkX*config.ChunkWidth
+	localZ := z - chunkZ*config.ChunkWidth
+
+	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
+	if !exists {
+		return 15 // Default to full light if chunk is missing? Or 0? 15 implies open sky.
+	}
+	return chunk.GetLight(localX, y, localZ)
+}
+
+// SetLight sets the light level at the global world coordinates.
+func (w *World) SetLight(x, y, z int, level uint8) {
+	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
+	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
+
+	localX := x - chunkX*config.ChunkWidth
+	localZ := z - chunkZ*config.ChunkWidth
+
+	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
+	if !exists {
+		return
+	}
+	chunk.SetLight(localX, y, localZ, level)
+}
+
 // GetChunk returns the chunk at the given chunk coordinates.
 func (w *World) GetChunk(x, z int) *Chunk {
 	return w.Chunks[ChunkCoord{X: x, Z: z}]

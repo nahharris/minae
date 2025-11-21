@@ -8,9 +8,9 @@ import (
 // Chunk represents a 16x16x256 section of the world.
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
-	Blocks [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]blocks.NumID
-	X, Z   int // Chunk coordinates in the world grid (not world position)
-
+	Blocks   [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]blocks.NumID
+	LightMap [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
+	X, Z     int // Chunk coordinates in the world grid (not world position)
 	meshHint chunkMeshHint
 }
 
@@ -50,6 +50,29 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 	}
 	index := c.getBlockIndex(x, y, z)
 	c.Blocks[index] = blocks.NumericIDOf(block)
+	return true
+}
+
+// GetLight returns the light level at the specified local coordinates.
+// x, z: 0 to 15
+// y: 0 to 255
+// Returns 0 if coordinates are out of bounds.
+func (c *Chunk) GetLight(x, y, z int) uint8 {
+	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
+		return 0
+	}
+	index := c.getBlockIndex(x, y, z)
+	return c.LightMap[index]
+}
+
+// SetLight sets the light level at the specified local coordinates.
+// Returns true if successful, false if coordinates are out of bounds.
+func (c *Chunk) SetLight(x, y, z int, level uint8) bool {
+	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
+		return false
+	}
+	index := c.getBlockIndex(x, y, z)
+	c.LightMap[index] = level
 	return true
 }
 

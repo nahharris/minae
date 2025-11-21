@@ -2,10 +2,17 @@ package lighting
 
 import (
 	"math"
+	_ "embed"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"
 )
+
+//go:embed shaders/vertex.glsl
+var VsCode string
+
+//go:embed shaders/fragment.glsl
+var FsCode string
 
 // DayState represents the lighting configuration at a specific time of day.
 type DayState struct {

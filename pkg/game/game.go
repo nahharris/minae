@@ -57,6 +57,11 @@ func NewGame() *Game {
 	l := lighting.NewManager()
 	shader := rl.LoadShaderFromMemory(lighting.VsCode, lighting.FsCode)
 
+	// Calculate initial lighting for all chunks
+	for _, chunk := range w.Chunks {
+		lighting.CalculateChunkLighting(chunk, w)
+	}
+
 	// Initialize UI
 	u := ui.NewUIManager(p, w, l)
 
@@ -143,6 +148,16 @@ func (g *Game) Update() {
 
 		// Handle Block Interaction
 		affectedChunks := g.Player.HandleBlockInteraction(g.World)
+		
+		// Recalculate lighting for affected chunks
+		// Note: Ideally this should propagate to neighbors if light spills over, 
+		// but for now we just update the chunks that were physically modified or are immediate neighbors.
+		for _, coord := range affectedChunks {
+			if chunk, exists := g.World.Chunks[coord]; exists {
+				lighting.CalculateChunkLighting(chunk, g.World)
+			}
+		}
+
 		for _, coord := range affectedChunks {
 			// Regenerate mesh for affected chunk
 			if chunk, exists := g.World.Chunks[coord]; exists {
