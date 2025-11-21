@@ -37,14 +37,14 @@ func (u *UIManager) DrawHUD(screenWidth, screenHeight int, p *player.Player) {
 	const padding = 10
 	const itemHeight = 30
 	const itemWidth = 150
-	
+
 	startX := int32(screenWidth) - itemWidth - padding
-	startY := int32(screenHeight) / 2 - int32(len(p.Inventory)*itemHeight)/2
+	startY := int32(screenHeight)/2 - int32(len(p.Inventory)*itemHeight)/2
 
 	for i, block := range p.Inventory {
 		y := startY + int32(i*itemHeight)
-		
-		color := rl.White
+
+		var color rl.Color
 		if i == p.SelectedBlockIndex {
 			color = rl.Yellow
 			// Draw selection box
@@ -52,10 +52,10 @@ func (u *UIManager) DrawHUD(screenWidth, screenHeight int, p *player.Player) {
 		} else {
 			color = rl.LightGray
 		}
-		
+
 		// Draw Block Name
 		rl.DrawText(block.Name, startX, y+5, 20, color)
-		
+
 		// Optional: Draw a small colored rect representing the block color
 		c := rl.GetColor(uint(block.Color))
 		rl.DrawRectangle(startX+100, y+5, 20, 20, c)
