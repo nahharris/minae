@@ -6,6 +6,22 @@ import (
 	"github.com/nahharris/minae/pkg/config"
 )
 
+// MeshBuffer is a reusable buffer for mesh generation to avoid allocations.
+type MeshBuffer struct {
+	Vertices  []float32
+	Texcoords []float32
+	Normals   []float32
+	Colors    []uint8
+}
+
+// Reset clears the buffer for reuse while keeping capacity.
+func (m *MeshBuffer) Reset() {
+	m.Vertices = m.Vertices[:0]
+	m.Texcoords = m.Texcoords[:0]
+	m.Normals = m.Normals[:0]
+	m.Colors = m.Colors[:0]
+}
+
 // ChunkMeshData holds the raw data for a chunk mesh.
 type ChunkMeshData struct {
 	Vertices  []float32
@@ -17,11 +33,20 @@ type ChunkMeshData struct {
 // CalculateChunkMesh generates the mesh data for the given chunk.
 // It performs face culling to remove invisible faces.
 // world: used to check neighbors across chunk boundaries.
-func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
+// buffer: optional buffer to reuse. If nil, new slices are allocated.
+func CalculateChunkMesh(chunk *Chunk, world *World, buffer *MeshBuffer) *ChunkMeshData {
 	var vertices []float32
 	var texcoords []float32
 	var normals []float32
 	var colors []uint8
+
+	if buffer != nil {
+		buffer.Reset()
+		vertices = buffer.Vertices
+		texcoords = buffer.Texcoords
+		normals = buffer.Normals
+		colors = buffer.Colors
+	}
 
 	// Helper to add a face
 	addFace := func(x, y, z int, normal rl.Vector3, color rl.Color) {
@@ -124,6 +149,13 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 		return nil
 	}
 
+	if buffer != nil {
+		buffer.Vertices = vertices
+		buffer.Texcoords = texcoords
+		buffer.Normals = normals
+		buffer.Colors = colors
+	}
+
 	return &ChunkMeshData{
 		Vertices:  vertices,
 		Texcoords: texcoords,
@@ -138,8 +170,8 @@ func isAir(b *blocks.Block) bool {
 }
 
 // GenerateChunkMesh generates and uploads a Raylib mesh.
-func GenerateChunkMesh(chunk *Chunk, world *World) *rl.Mesh {
-	data := CalculateChunkMesh(chunk, world)
+func GenerateChunkMesh(chunk *Chunk, world *World, buffer *MeshBuffer) *rl.Mesh {
+	data := CalculateChunkMesh(chunk, world, buffer)
 	if data == nil {
 		return nil
 	}

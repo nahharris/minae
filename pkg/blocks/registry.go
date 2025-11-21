@@ -13,14 +13,16 @@ import (
 
 // Registry manages all loaded block definitions.
 type Registry struct {
-	blocks map[string]*Block
-	mu     sync.RWMutex
+	blocks     map[string]*Block
+	blocksByID []*Block
+	mu         sync.RWMutex
 }
 
 var (
 	// Global registry instance
 	globalRegistry = &Registry{
-		blocks: make(map[string]*Block),
+		blocks:     make(map[string]*Block),
+		blocksByID: make([]*Block, 0, 256),
 	}
 )
 
@@ -30,6 +32,16 @@ func Get(id string) *Block {
 	globalRegistry.mu.RLock()
 	defer globalRegistry.mu.RUnlock()
 	return globalRegistry.blocks[id]
+}
+
+// GetByID returns a block definition by numeric ID.
+func GetByID(id uint16) *Block {
+	globalRegistry.mu.RLock()
+	defer globalRegistry.mu.RUnlock()
+	if int(id) >= len(globalRegistry.blocksByID) {
+		return nil
+	}
+	return globalRegistry.blocksByID[id]
 }
 
 // GetAll returns all registered blocks, sorted by ID.
@@ -53,7 +65,19 @@ func GetAll() []*Block {
 func Register(b *Block) *Block {
 	globalRegistry.mu.Lock()
 	defer globalRegistry.mu.Unlock()
-	globalRegistry.blocks[b.ID] = b
+
+	if existing, ok := globalRegistry.blocks[b.ID]; ok {
+		// Update existing block, preserve ID
+		b.NumID = existing.NumID
+		globalRegistry.blocks[b.ID] = b
+		globalRegistry.blocksByID[b.NumID] = b
+	} else {
+		// New block
+		b.NumID = uint16(len(globalRegistry.blocksByID))
+		globalRegistry.blocks[b.ID] = b
+		globalRegistry.blocksByID = append(globalRegistry.blocksByID, b)
+	}
+
 	return b
 }
 
@@ -62,6 +86,7 @@ func Reset() {
 	globalRegistry.mu.Lock()
 	defer globalRegistry.mu.Unlock()
 	globalRegistry.blocks = make(map[string]*Block)
+	globalRegistry.blocksByID = make([]*Block, 0, 256)
 }
 
 // Load recursively walks the blocks directory and loads all YAML definitions.

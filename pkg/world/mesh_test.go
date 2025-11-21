@@ -19,7 +19,7 @@ func TestCalculateChunkMesh_Culling(t *testing.T) {
 	// It should have all 6 faces visible (since neighbors are air)
 	c.SetBlock(8, 8, 8, stone)
 
-	data := CalculateChunkMesh(c, w)
+	data := CalculateChunkMesh(c, w, nil)
 
 	if data == nil {
 		t.Fatal("Expected mesh data, got nil")
@@ -35,7 +35,7 @@ func TestCalculateChunkMesh_Culling(t *testing.T) {
 	c.SetBlock(8, 9, 8, stone)
 
 	// Recalculate
-	data = CalculateChunkMesh(c, w)
+	data = CalculateChunkMesh(c, w, nil)
 
 	// Bottom block (8,8,8): Top face hidden. 5 faces.
 	// Top block (8,9,8): Bottom face hidden. 5 faces.
@@ -51,7 +51,7 @@ func TestCalculateChunkMesh_Empty(t *testing.T) {
 	c := NewChunk(0, 0)
 	w.Chunks[ChunkCoord{0, 0}] = c
 
-	data := CalculateChunkMesh(c, w)
+	data := CalculateChunkMesh(c, w, nil)
 	if data != nil {
 		t.Error("Expected nil mesh for empty chunk")
 	}
