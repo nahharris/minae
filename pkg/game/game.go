@@ -1,8 +1,6 @@
 package game
 
 import (
-	"fmt"
-
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/player"
@@ -37,6 +35,12 @@ type Game struct {
 	LocLightColor int32
 	LocAmbient    int32
 	LocViewPos    int32
+
+	// Reusable shader value slices to avoid per-frame allocations
+	shaderLightDir   []float32 // Vec3
+	shaderLightColor []float32 // Vec4
+	shaderAmbient    []float32 // Vec4
+	shaderViewPos    []float32 // Vec3
 }
 
 // NewGame initializes the game systems.
@@ -49,12 +53,12 @@ func NewGame() *Game {
 	w := world.NewWorld()
 	w.GenerateFixedGrid()
 
-	// Initialize UI
-	u := ui.NewUIManager()
-
 	// Initialize Lighting
 	l := lighting.NewManager()
 	shader := rl.LoadShaderFromMemory(lighting.VsCode, lighting.FsCode)
+
+	// Initialize UI
+	u := ui.NewUIManager(p, w, l)
 
 	// Get Shader Locations
 	// Standard locations are set automatically by LoadShader if names match standard Raylib names.
@@ -82,6 +86,11 @@ func NewGame() *Game {
 		LocLightColor: locLightColor,
 		LocAmbient:    locAmbient,
 		LocViewPos:    locViewPos,
+		// Pre-allocate shader value slices
+		shaderLightDir:   make([]float32, 3),
+		shaderLightColor: make([]float32, 4),
+		shaderAmbient:    make([]float32, 4),
+		shaderViewPos:    make([]float32, 3),
 	}
 
 	g.generateMeshes()
@@ -164,19 +173,31 @@ func (g *Game) Draw() {
 
 	rl.ClearBackground(skyColor)
 
-	// Set Shader Values
-	// Raylib Go wrappers for SetShaderValue are a bit specific.
-	// We need to pass slice of float32.
-	rl.SetShaderValue(g.Shader, g.LocLightDir, []float32{lightDir.X, lightDir.Y, lightDir.Z}, rl.ShaderUniformVec3)
+	// Set Shader Values using pre-allocated slices
+	g.shaderLightDir[0] = lightDir.X
+	g.shaderLightDir[1] = lightDir.Y
+	g.shaderLightDir[2] = lightDir.Z
+	rl.SetShaderValue(g.Shader, g.LocLightDir, g.shaderLightDir, rl.ShaderUniformVec3)
 
 	lc := rl.ColorNormalize(lightColor)
-	rl.SetShaderValue(g.Shader, g.LocLightColor, []float32{lc.X, lc.Y, lc.Z, lc.W}, rl.ShaderUniformVec4)
+	g.shaderLightColor[0] = lc.X
+	g.shaderLightColor[1] = lc.Y
+	g.shaderLightColor[2] = lc.Z
+	g.shaderLightColor[3] = lc.W
+	rl.SetShaderValue(g.Shader, g.LocLightColor, g.shaderLightColor, rl.ShaderUniformVec4)
 
 	ac := rl.ColorNormalize(ambientColor)
-	rl.SetShaderValue(g.Shader, g.LocAmbient, []float32{ac.X, ac.Y, ac.Z, ac.W}, rl.ShaderUniformVec4)
+	g.shaderAmbient[0] = ac.X
+	g.shaderAmbient[1] = ac.Y
+	g.shaderAmbient[2] = ac.Z
+	g.shaderAmbient[3] = ac.W
+	rl.SetShaderValue(g.Shader, g.LocAmbient, g.shaderAmbient, rl.ShaderUniformVec4)
 
 	camPos := g.Player.Camera.Position
-	rl.SetShaderValue(g.Shader, g.LocViewPos, []float32{camPos.X, camPos.Y, camPos.Z}, rl.ShaderUniformVec3)
+	g.shaderViewPos[0] = camPos.X
+	g.shaderViewPos[1] = camPos.Y
+	g.shaderViewPos[2] = camPos.Z
+	rl.SetShaderValue(g.Shader, g.LocViewPos, g.shaderViewPos, rl.ShaderUniformVec3)
 
 	// 3D World
 	rl.BeginMode3D(g.Player.Camera)
@@ -200,7 +221,7 @@ func (g *Game) Draw() {
 		// TargetBlock is integer coordinates, so we can use it directly.
 		// We need to add 0.5 to center it, and size 1.005 to be slightly outside.
 		targetPos := rl.Vector3Add(g.Player.TargetBlock, rl.NewVector3(0.5, 0.5, 0.5))
-		rl.DrawCubeWires(targetPos, 1.05, 1.05, 1.05, rl.Black)
+		rl.DrawCubeWires(targetPos, 1.01, 1.01, 1.01, rl.Black)
 	}
 
 	rl.EndMode3D()
@@ -210,7 +231,7 @@ func (g *Game) Draw() {
 	screenHeight := rl.GetScreenHeight()
 
 	if g.State == StatePlaying {
-		g.UI.DrawHUD(screenWidth, screenHeight, g.Player)
+		g.UI.DrawHUD(screenWidth, screenHeight)
 	}
 
 	if g.State == StatePaused {
@@ -226,18 +247,10 @@ func (g *Game) Draw() {
 
 	// Debug Overlay
 	if g.UI.ShowDebug {
-		timeStr := timeToString(g.Lighting.Time, g.Lighting.CycleDuration)
-		g.UI.DrawDebug(g.Player, g.World, timeStr)
+		g.UI.DrawDebug()
 	}
 
 	rl.EndDrawing()
-}
-
-// Helper to format time
-func timeToString(time, duration float32) string {
-	hour := int((time / duration) * 24.0)
-	minute := int(((time/duration)*24.0 - float32(hour)) * 60.0)
-	return fmt.Sprintf("%02d:%02d", hour, minute)
 }
 
 // Unload cleans up resources.

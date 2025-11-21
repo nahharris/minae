@@ -108,8 +108,9 @@ func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
 		return nil
 	}
 
-	// List of chunks to update
-	affected := []ChunkCoord{coord}
+	// Pre-allocate slice with capacity for max neighbors (5 chunks: center + 4 neighbors)
+	affected := make([]ChunkCoord, 1, 5)
+	affected[0] = coord
 
 	// Check neighbors if on border
 	switch localX {
