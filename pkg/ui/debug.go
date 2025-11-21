@@ -32,19 +32,13 @@ func (u *UIManager) initDebug() {
 
 	// Memory
 	left.AddChild(minui.NewReactiveLabel(func() string {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		return fmt.Sprintf("Alloc: %v MB", m.Alloc/1024/1024)
+		return fmt.Sprintf("Alloc: %v MB", u.memStats.Alloc/1024/1024)
 	}))
 	left.AddChild(minui.NewReactiveLabel(func() string {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		return fmt.Sprintf("TotalAlloc: %v MB", m.TotalAlloc/1024/1024)
+		return fmt.Sprintf("TotalAlloc: %v MB", u.memStats.TotalAlloc/1024/1024)
 	}))
 	left.AddChild(minui.NewReactiveLabel(func() string {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		return fmt.Sprintf("Sys: %v MB", m.Sys/1024/1024)
+		return fmt.Sprintf("Sys: %v MB", u.memStats.Sys/1024/1024)
 	}))
 
 	// Player Position
@@ -68,7 +62,7 @@ func (u *UIManager) initDebug() {
 		localZ := int(pos.Z) - chunkZ*config.ChunkWidth
 		return fmt.Sprintf("Chunk: %d, %d (Loc: %d, %d)", chunkX, chunkZ, localX, localZ)
 	}))
-	
+
 	// Direction
 	left.AddChild(minui.NewReactiveLabel(func() string {
 		if u.Player == nil {
@@ -100,25 +94,27 @@ func (u *UIManager) DrawDebug() {
 		return
 	}
 
+	u.captureMemStats()
+
 	// Left Panel Positioning
 	// Fixed position 5,5
 	// We need to compute size to set bounds properly (mostly for background)
 	available := minui.Size{Width: 300, Height: 1000} // Max height
-	
+
 	// Left
 	leftSize := u.debugRoot.ComputeSize(available)
 	// Force width to 300 as per original
-	leftSize.Width = 300 
+	leftSize.Width = 300
 	u.debugRoot.SetBounds(minui.Rect{X: 5, Y: 5, Width: leftSize.Width, Height: leftSize.Height})
 	u.debugRoot.Draw()
 
 	// Right Panel Positioning
 	screenWidth := float32(rl.GetScreenWidth())
 	panelWidth := float32(300)
-	
+
 	rightSize := u.debugInfoRoot.ComputeSize(minui.Size{Width: panelWidth, Height: 1000})
 	rightSize.Width = panelWidth
-	
+
 	panelX := screenWidth - panelWidth - 10
 	u.debugInfoRoot.SetBounds(minui.Rect{X: panelX, Y: 5, Width: rightSize.Width, Height: rightSize.Height})
 	u.debugInfoRoot.Draw()
@@ -128,4 +124,8 @@ func formatTime(time, duration float32) string {
 	hour := int((time / duration) * 24.0)
 	minute := int(((time/duration)*24.0 - float32(hour)) * 60.0)
 	return fmt.Sprintf("%02d:%02d", hour, minute)
+}
+
+func (u *UIManager) captureMemStats() {
+	runtime.ReadMemStats(&u.memStats)
 }

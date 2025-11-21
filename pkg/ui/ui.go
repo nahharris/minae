@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"runtime"
+
 	"github.com/nahharris/minae/minui"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/world"
@@ -26,6 +28,8 @@ type UIManager struct {
 	// Pause menu interaction state
 	ResumeClicked bool
 	QuitClicked   bool
+
+	memStats runtime.MemStats
 }
 
 // NewUIManager creates a new UIManager.
