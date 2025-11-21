@@ -1,11 +1,14 @@
 package game
 
 import (
+	"fmt"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/ui"
 	"github.com/nahharris/minae/pkg/world"
+	"github.com/nahharris/minae/pkg/world/lighting"
 )
 
 type GameState int
@@ -17,13 +20,23 @@ const (
 
 // Game manages the global game state and systems.
 type Game struct {
-	Player         *player.Player
-	World          *world.World
-	UI             *ui.UIManager
-	State          GameState
-	ChunkMeshes    map[world.ChunkCoord]*rl.Mesh
-	ChunkMaterials map[world.ChunkCoord]rl.Material
-	Running        bool
+	Player      *player.Player
+	World       *world.World
+	UI          *ui.UIManager
+	State       GameState
+	ChunkMeshes map[world.ChunkCoord]*rl.Mesh
+	Running     bool
+
+	// Lighting
+	Lighting      *lighting.Manager
+	Shader        rl.Shader
+	ChunkMaterial rl.Material
+
+	// Shader Locations
+	LocLightDir   int32
+	LocLightColor int32
+	LocAmbient    int32
+	LocViewPos    int32
 }
 
 // NewGame initializes the game systems.
@@ -39,14 +52,36 @@ func NewGame() *Game {
 	// Initialize UI
 	u := ui.NewUIManager()
 
+	// Initialize Lighting
+	l := lighting.NewManager()
+	shader := rl.LoadShaderFromMemory(lighting.VsCode, lighting.FsCode)
+
+	// Get Shader Locations
+	// Standard locations are set automatically by LoadShader if names match standard Raylib names.
+	// Custom locations need to be retrieved.
+	locLightDir := rl.GetShaderLocation(shader, "lightDir")
+	locLightColor := rl.GetShaderLocation(shader, "lightColor")
+	locAmbient := rl.GetShaderLocation(shader, "ambientColor")
+	locViewPos := rl.GetShaderLocation(shader, "viewPos")
+
+	// Create shared material
+	mat := rl.LoadMaterialDefault()
+	mat.Shader = shader
+
 	g := &Game{
-		Player:         p,
-		World:          w,
-		UI:             u,
-		State:          StatePlaying,
-		ChunkMeshes:    make(map[world.ChunkCoord]*rl.Mesh),
-		ChunkMaterials: make(map[world.ChunkCoord]rl.Material),
-		Running:        true,
+		Player:        p,
+		World:         w,
+		UI:            u,
+		State:         StatePlaying,
+		ChunkMeshes:   make(map[world.ChunkCoord]*rl.Mesh),
+		Running:       true,
+		Lighting:      l,
+		Shader:        shader,
+		ChunkMaterial: mat,
+		LocLightDir:   locLightDir,
+		LocLightColor: locLightColor,
+		LocAmbient:    locAmbient,
+		LocViewPos:    locViewPos,
 	}
 
 	g.generateMeshes()
@@ -60,9 +95,6 @@ func (g *Game) generateMeshes() {
 		mesh := world.GenerateChunkMesh(chunk, g.World)
 		if mesh != nil {
 			g.ChunkMeshes[coord] = mesh
-			// We need a material to draw the mesh
-			mat := rl.LoadMaterialDefault()
-			g.ChunkMaterials[coord] = mat
 		}
 	}
 }
@@ -94,8 +126,11 @@ func (g *Game) Update() {
 			rl.DisableCursor()
 		}
 
-		// Only update player if playing
+		// Update Lighting
 		dt := rl.GetFrameTime()
+		g.Lighting.Update(dt)
+
+		// Only update player if playing
 		g.Player.Update(dt)
 
 		// Handle Block Interaction
@@ -111,10 +146,6 @@ func (g *Game) Update() {
 				newMesh := world.GenerateChunkMesh(chunk, g.World)
 				if newMesh != nil {
 					g.ChunkMeshes[coord] = newMesh
-					// Ensure material exists (it should)
-					if _, ok := g.ChunkMaterials[coord]; !ok {
-						g.ChunkMaterials[coord] = rl.LoadMaterialDefault()
-					}
 				} else {
 					// If mesh is nil (e.g. empty chunk), remove from map
 					delete(g.ChunkMeshes, coord)
@@ -127,14 +158,32 @@ func (g *Game) Update() {
 // Draw renders the game scene and UI.
 func (g *Game) Draw() {
 	rl.BeginDrawing()
-	rl.ClearBackground(rl.SkyBlue)
+
+	// Update Lighting Uniforms
+	skyColor, lightColor, ambientColor, lightDir := g.Lighting.GetState()
+
+	rl.ClearBackground(skyColor)
+
+	// Set Shader Values
+	// Raylib Go wrappers for SetShaderValue are a bit specific.
+	// We need to pass slice of float32.
+	rl.SetShaderValue(g.Shader, g.LocLightDir, []float32{lightDir.X, lightDir.Y, lightDir.Z}, rl.ShaderUniformVec3)
+
+	lc := rl.ColorNormalize(lightColor)
+	rl.SetShaderValue(g.Shader, g.LocLightColor, []float32{lc.X, lc.Y, lc.Z, lc.W}, rl.ShaderUniformVec4)
+
+	ac := rl.ColorNormalize(ambientColor)
+	rl.SetShaderValue(g.Shader, g.LocAmbient, []float32{ac.X, ac.Y, ac.Z, ac.W}, rl.ShaderUniformVec4)
+
+	camPos := g.Player.Camera.Position
+	rl.SetShaderValue(g.Shader, g.LocViewPos, []float32{camPos.X, camPos.Y, camPos.Z}, rl.ShaderUniformVec3)
 
 	// 3D World
 	rl.BeginMode3D(g.Player.Camera)
 
 	for coord, mesh := range g.ChunkMeshes {
 		pos := rl.NewVector3(float32(coord.X*config.ChunkWidth), 0, float32(coord.Z*config.ChunkWidth))
-		rl.DrawMesh(*mesh, g.ChunkMaterials[coord], rl.MatrixTranslate(pos.X, pos.Y, pos.Z))
+		rl.DrawMesh(*mesh, g.ChunkMaterial, rl.MatrixTranslate(pos.X, pos.Y, pos.Z))
 
 		// Debug: Draw Chunk Bounds
 		if g.UI.ShowDebug && g.UI.ShowAllUI {
@@ -142,8 +191,8 @@ func (g *Game) Draw() {
 		}
 	}
 
-	// Draw Grid for reference
-	rl.DrawGrid(100, 1.0)
+	// Draw Grid for reference (optional, might look weird with lighting now)
+	// rl.DrawGrid(100, 1.0)
 
 	// Draw Selection Highlight
 	if g.Player.HasTarget {
@@ -151,7 +200,7 @@ func (g *Game) Draw() {
 		// TargetBlock is integer coordinates, so we can use it directly.
 		// We need to add 0.5 to center it, and size 1.005 to be slightly outside.
 		targetPos := rl.Vector3Add(g.Player.TargetBlock, rl.NewVector3(0.5, 0.5, 0.5))
-		rl.DrawCubeWires(targetPos, 1.05, 1.05, 1.05, rl.Black) // Inverted color logic is hard in Raylib simply, Black/White is good enough
+		rl.DrawCubeWires(targetPos, 1.05, 1.05, 1.05, rl.Black)
 	}
 
 	rl.EndMode3D()
@@ -177,14 +226,23 @@ func (g *Game) Draw() {
 
 	// Debug Overlay
 	if g.UI.ShowDebug {
-		g.UI.DrawDebug(g.Player, g.World)
+		timeStr := timeToString(g.Lighting.Time, g.Lighting.CycleDuration)
+		g.UI.DrawDebug(g.Player, g.World, timeStr)
 	}
 
 	rl.EndDrawing()
 }
 
+// Helper to format time
+func timeToString(time, duration float32) string {
+	hour := int((time / duration) * 24.0)
+	minute := int(((time/duration)*24.0 - float32(hour)) * 60.0)
+	return fmt.Sprintf("%02d:%02d", hour, minute)
+}
+
 // Unload cleans up resources.
 func (g *Game) Unload() {
+	rl.UnloadShader(g.Shader)
 	for _, mesh := range g.ChunkMeshes {
 		rl.UnloadMesh(mesh)
 	}

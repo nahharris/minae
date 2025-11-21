@@ -12,13 +12,13 @@ import (
 )
 
 // DrawDebug draws debug information like FPS, player coordinates, etc.
-func (u *UIManager) DrawDebug(p *player.Player, w *world.World) {
+func (u *UIManager) DrawDebug(p *player.Player, w *world.World, timeStr string) {
 	if !u.ShowAllUI || !u.ShowDebug {
 		return
 	}
 
 	// Background for debug text
-	rl.DrawRectangle(5, 5, 300, 150, rl.Fade(rl.Black, 0.5))
+	rl.DrawRectangle(5, 5, 300, 210, rl.Fade(rl.Black, 0.5))
 
 	y := int32(10)
 	fontSize := int32(20)
@@ -26,6 +26,10 @@ func (u *UIManager) DrawDebug(p *player.Player, w *world.World) {
 
 	// FPS
 	rl.DrawFPS(10, y)
+	y += spacing
+
+	// Time
+	rl.DrawText("Time: "+timeStr, 10, y, fontSize, rl.White)
 	y += spacing
 
 	// Memory Usage
