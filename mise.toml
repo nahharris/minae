@@ -5,7 +5,7 @@ golangci-lint = "latest"
 [tasks.build]
 run = "go build -o bin/main main.go"
 run_windows = "go build -o bin/main.exe main.go"
-description = "Compile the game, outputing the results to bin/"
+description = "Compile the game, outputting the results to bin/"
 
 [tasks.dev]
 run = "./bin/main"
@@ -40,8 +40,8 @@ run_windows = [
 description = "Download and install the Raylib DLL for Windows. Only needed once at setup."
 
 [tasks."clean:build"]
-run = "rm -f main"
-run_windows = "rm main.exe"
+run = "rm -f bin/main"
+run_windows = "rm -f bin/main.exe"
 description = "Remove the compiled binary from the bin/ directory."
 
 [tasks."clean:setup"]

@@ -177,9 +177,8 @@ func buildChunkMesh(chunk *Chunk, world *World) *meshBuilder {
 					if neighbor == nil || isAir(neighbor) {
 						// Get light level of the air block we are facing
 						light := world.GetLight(gx+dx, gy+dy, gz+dz)
-						// Map 0-15 to 0-255
-						alpha := uint8(float32(light) / 15.0 * 255.0)
-						
+						// Map 0-15 to 0-255 using integer arithmetic to avoid precision issues
+						alpha := uint8((uint16(light) * 255) / 15)
 						faceColor := color
 						faceColor.A = alpha
 						addFace(x, y, z, normal, faceColor)
