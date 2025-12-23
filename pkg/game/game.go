@@ -148,9 +148,9 @@ func (g *Game) Update() {
 
 		// Handle Block Interaction
 		affectedChunks := g.Player.HandleBlockInteraction(g.World)
-		
+
 		// Recalculate lighting for affected chunks
-		// Note: Ideally this should propagate to neighbors if light spills over, 
+		// Note: Ideally this should propagate to neighbors if light spills over,
 		// but for now we just update the chunks that were physically modified or are immediate neighbors.
 		for _, coord := range affectedChunks {
 			if chunk, exists := g.World.Chunks[coord]; exists {

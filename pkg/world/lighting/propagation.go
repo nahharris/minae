@@ -57,7 +57,58 @@ func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
 		}
 	}
 
-	// 2. Propagate Light (BFS)
+	// 2. Seed BFS queue with light from neighboring chunk borders
+	// This ensures cross-chunk light propagation is preserved during incremental updates
+	neighborOffsets := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+	for _, offset := range neighborOffsets {
+		neighborChunk := w.GetChunk(chunk.X+offset[0], chunk.Z+offset[1])
+		if neighborChunk == nil {
+			continue
+		}
+
+		// Determine which border of the neighbor to read from
+		var borderX, borderZ int
+		var iterX, iterZ bool
+
+		if offset[0] == -1 { // Neighbor to the left, read its right border (x=15)
+			borderX = config.ChunkWidth - 1
+			iterZ = true
+		} else if offset[0] == 1 { // Neighbor to the right, read its left border (x=0)
+			borderX = 0
+			iterZ = true
+		} else if offset[1] == -1 { // Neighbor behind, read its front border (z=15)
+			borderZ = config.ChunkWidth - 1
+			iterX = true
+		} else if offset[1] == 1 { // Neighbor in front, read its back border (z=0)
+			borderZ = 0
+			iterX = true
+		}
+
+		// Iterate along the border and seed queue with light sources
+		for y := 0; y < config.ChunkHeight; y++ {
+			if iterX {
+				for x := 0; x < config.ChunkWidth; x++ {
+					lightLevel := neighborChunk.GetLight(x, y, borderZ)
+					if lightLevel > 1 { // Only add if can propagate further
+						globalX := neighborChunk.X*config.ChunkWidth + x
+						globalZ := neighborChunk.Z*config.ChunkWidth + borderZ
+						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
+					}
+				}
+			} else if iterZ {
+				for z := 0; z < config.ChunkWidth; z++ {
+					lightLevel := neighborChunk.GetLight(borderX, y, z)
+					if lightLevel > 1 {
+						globalX := neighborChunk.X*config.ChunkWidth + borderX
+						globalZ := neighborChunk.Z*config.ChunkWidth + z
+						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Propagate Light (BFS)
 	directions := [][3]int{
 		{1, 0, 0}, {-1, 0, 0},
 		{0, 1, 0}, {0, -1, 0},
@@ -113,4 +164,3 @@ func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
 		}
 	}
 }
-
