@@ -1,8 +1,6 @@
 package world
 
 import (
-	"math"
-
 	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
 )
@@ -63,11 +61,8 @@ func (w *World) fillChunkDebug(c *Chunk) {
 
 // GetBlock returns the block type at the global world coordinates.
 func (w *World) GetBlock(x, y, z int) *blocks.Block {
-	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
-	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
-
-	localX := x - chunkX*config.ChunkWidth
-	localZ := z - chunkZ*config.ChunkWidth
+	chunkX, localX := worldToLocal(x)
+	chunkZ, localZ := worldToLocal(z)
 
 	// Fix negative modulo issues if strictly using modulo
 	// But the subtraction above handles it if chunkX is calculated with Floor correctly.
@@ -82,11 +77,8 @@ func (w *World) GetBlock(x, y, z int) *blocks.Block {
 
 // GetLight returns the light level at the global world coordinates.
 func (w *World) GetLight(x, y, z int) uint8 {
-	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
-	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
-
-	localX := x - chunkX*config.ChunkWidth
-	localZ := z - chunkZ*config.ChunkWidth
+	chunkX, localX := worldToLocal(x)
+	chunkZ, localZ := worldToLocal(z)
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
@@ -97,11 +89,8 @@ func (w *World) GetLight(x, y, z int) uint8 {
 
 // SetLight sets the light level at the global world coordinates.
 func (w *World) SetLight(x, y, z int, level uint8) {
-	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
-	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
-
-	localX := x - chunkX*config.ChunkWidth
-	localZ := z - chunkZ*config.ChunkWidth
+	chunkX, localX := worldToLocal(x)
+	chunkZ, localZ := worldToLocal(z)
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
@@ -122,11 +111,8 @@ func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
 		return nil
 	}
 
-	chunkX := int(math.Floor(float64(x) / float64(config.ChunkWidth)))
-	chunkZ := int(math.Floor(float64(z) / float64(config.ChunkWidth)))
-
-	localX := x - chunkX*config.ChunkWidth
-	localZ := z - chunkZ*config.ChunkWidth
+	chunkX, localX := worldToLocal(x)
+	chunkZ, localZ := worldToLocal(z)
 
 	coord := ChunkCoord{X: chunkX, Z: chunkZ}
 	chunk, exists := w.Chunks[coord]
@@ -158,4 +144,17 @@ func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
 	}
 
 	return affected
+}
+
+// worldToLocal converts a global coordinate to chunk and local coordinates.
+// It correctly handles negative coordinates using floor division logic.
+func worldToLocal(v int) (chunk, local int) {
+	chunk = v / config.ChunkWidth
+	local = v % config.ChunkWidth
+
+	if local < 0 {
+		chunk--
+		local += config.ChunkWidth
+	}
+	return
 }
