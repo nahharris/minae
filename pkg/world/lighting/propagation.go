@@ -11,19 +11,25 @@ type LightNode struct {
 	Level   uint8
 }
 
+var directions = [][3]int{
+	{1, 0, 0}, {-1, 0, 0},
+	{0, 1, 0}, {0, -1, 0},
+	{0, 0, 1}, {0, 0, -1},
+}
+
 // CalculateChunkLighting calculates the static skylight propagation for a single chunk.
 // Note: For a full infinite world, this needs to handle cross-chunk propagation more robustly (e.g., lighting updates).
 // But for generation, this works if we generate neighbors or handle boundaries.
 func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
-	// Queue for BFS
-	queue := make([]LightNode, 0)
+	// Queue for BFS. Pre-allocate capacity based on chunk dimensions to reduce reallocations.
+	queue := make([]LightNode, 0, config.ChunkWidth*config.ChunkWidth*config.ChunkHeight+4*config.ChunkWidth)
 
 	// 1. Initialize Skylight
 	// Go top-down. Sunlight hits the first solid block.
 	// Anything above the first solid block gets 15.
 	// The first solid block and below get 0 (initially).
-	for x := 0; x < config.ChunkWidth; x++ {
-		for z := 0; z < config.ChunkWidth; z++ {
+	for x := range config.ChunkWidth {
+		for z := range config.ChunkWidth {
 			// Start from top
 			lightLevel := uint8(15)
 			for y := config.ChunkHeight - 1; y >= 0; y-- {
@@ -85,20 +91,20 @@ func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
 		}
 
 		// Iterate along the border and seed queue with light sources
-		for y := 0; y < config.ChunkHeight; y++ {
+		for y := range config.ChunkHeight {
 			if iterX {
-				for x := 0; x < config.ChunkWidth; x++ {
+				for x := range config.ChunkWidth {
 					lightLevel := neighborChunk.GetLight(x, y, borderZ)
-					if lightLevel > 1 { // Only add if can propagate further
+					if lightLevel > 0 {
 						globalX := neighborChunk.X*config.ChunkWidth + x
 						globalZ := neighborChunk.Z*config.ChunkWidth + borderZ
 						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
 					}
 				}
 			} else if iterZ {
-				for z := 0; z < config.ChunkWidth; z++ {
+				for z := range config.ChunkWidth {
 					lightLevel := neighborChunk.GetLight(borderX, y, z)
-					if lightLevel > 1 {
+					if lightLevel > 0 {
 						globalX := neighborChunk.X*config.ChunkWidth + borderX
 						globalZ := neighborChunk.Z*config.ChunkWidth + z
 						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
@@ -108,16 +114,10 @@ func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
 		}
 	}
 
-	// 3. Propagate Light (BFS)
-	directions := [][3]int{
-		{1, 0, 0}, {-1, 0, 0},
-		{0, 1, 0}, {0, -1, 0},
-		{0, 0, 1}, {0, 0, -1},
-	}
-
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
+	head := 0
+	for head < len(queue) {
+		node := queue[head]
+		head++
 
 		// If light level is 1 or 0, it cannot propagate further (0 would become -1)
 		if node.Level <= 1 {
