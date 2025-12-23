@@ -175,7 +175,13 @@ func buildChunkMesh(chunk *Chunk, world *World) *meshBuilder {
 				checkNeighbor := func(dx, dy, dz int, normal rl.Vector3) {
 					neighbor := world.GetBlock(gx+dx, gy+dy, gz+dz)
 					if neighbor == nil || isAir(neighbor) {
-						addFace(x, y, z, normal, color)
+						// Get light level of the air block we are facing
+						light := world.GetLight(gx+dx, gy+dy, gz+dz)
+						// Map 0-15 to 0-255 using integer arithmetic to avoid precision issues
+						alpha := uint8((uint16(light) * 255) / 15)
+						faceColor := color
+						faceColor.A = alpha
+						addFace(x, y, z, normal, faceColor)
 					}
 				}
 

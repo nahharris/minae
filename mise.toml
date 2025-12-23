@@ -1,3 +1,49 @@
 [tools]
 go = "1.25"
 golangci-lint = "latest"
+
+[tasks.build]
+run = "go build -o bin/main main.go"
+run_windows = "go build -o bin/main.exe main.go"
+description = "Compile the game, outputting the results to bin/"
+
+[tasks.dev]
+run = "./bin/main"
+run_windows = ".\\bin\\main.exe"
+depends = ["build"]
+description = "Run the compiled game. Build it first if necessary."
+
+[tasks.lint]
+run = "golangci-lint run"
+description = "Run golangci-lint to check for code issues."
+
+[tasks."fix:lint"]
+run = "golangci-lint run --fix"
+description = "Automatically fix linting issues using golangci-lint."
+
+[tasks.test]
+run = "go test ./..."
+description = "Run all Go tests in the project."
+
+[tasks.setup]
+depends = ["install:raylib"]
+description = "Setup the project for development."
+
+[tasks."install:raylib"]
+run_windows = [
+    "wget https://github.com/raysan5/raylib/releases/download/5.5/raylib-5.5_win64_msvc16.zip",
+    "unzip raylib-5.5_win64_msvc16.zip",
+    "rm raylib-5.5_win64_msvc16.zip",
+    "mv raylib-5.5_win64_msvc16/lib/raylib.dll raylib.dll",
+    "rm -rf raylib-5.5_win64_msvc16",
+]
+description = "Download and install the Raylib DLL for Windows. Only needed once at setup."
+
+[tasks."clean:build"]
+run = "rm -f bin/main"
+run_windows = "rm -f bin/main.exe"
+description = "Remove the compiled binary from the bin/ directory."
+
+[tasks."clean:setup"]
+description = "Delete files installed during setup."
+run = "rm raylib.dll"

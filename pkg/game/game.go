@@ -57,6 +57,11 @@ func NewGame() *Game {
 	l := lighting.NewManager()
 	shader := rl.LoadShaderFromMemory(lighting.VsCode, lighting.FsCode)
 
+	// Calculate initial lighting for all chunks
+	for _, chunk := range w.Chunks {
+		lighting.CalculateChunkLighting(chunk, w)
+	}
+
 	// Initialize UI
 	u := ui.NewUIManager(p, w, l)
 
@@ -143,7 +148,32 @@ func (g *Game) Update() {
 
 		// Handle Block Interaction
 		affectedChunks := g.Player.HandleBlockInteraction(g.World)
+
+		// Build a deduplicated slice to avoid recalculating the same chunk multiple times
+		// when border updates enqueue overlapping neighbors. We still run a full
+		// CalculateChunkLighting for each chunk which is O(width*width*height) because
+		// the current lighting engine recomputes an entire chunk volume (including
+		// cross-chunk reads) instead of performing incremental updates. This is the
+		// simplest approach for now, but it has noticeable cost when large areas are
+		// modified and should eventually be replaced with a more incremental system.
+		chunkSet := make(map[world.ChunkCoord]struct{}, len(affectedChunks))
+		uniqueChunks := make([]world.ChunkCoord, 0, len(affectedChunks))
 		for _, coord := range affectedChunks {
+			if _, seen := chunkSet[coord]; seen {
+				continue
+			}
+			chunkSet[coord] = struct{}{}
+			uniqueChunks = append(uniqueChunks, coord)
+		}
+
+		// Recalculate lighting for affected chunks
+		for _, coord := range uniqueChunks {
+			if chunk, exists := g.World.Chunks[coord]; exists {
+				lighting.CalculateChunkLighting(chunk, g.World)
+			}
+		}
+
+		for _, coord := range uniqueChunks {
 			// Regenerate mesh for affected chunk
 			if chunk, exists := g.World.Chunks[coord]; exists {
 				// Unload old mesh

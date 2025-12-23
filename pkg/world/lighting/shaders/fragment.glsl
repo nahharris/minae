@@ -21,9 +21,13 @@ out vec4 finalColor;
 
 void main()
 {
+    // Extract Sky Light Level from Vertex Color Alpha (0.0 - 1.0)
+    float skyLight = fragColor.a;
+
     // Texture and Vertex Color
+    // We force alpha to 1.0 for modulation to avoid making dark blocks transparent
     vec4 texelColor = texture(texture0, fragTexCoord);
-    vec4 objectColor = texelColor * fragColor * colDiffuse;
+    vec4 objectColor = texelColor * vec4(fragColor.rgb, 1.0) * colDiffuse;
 
     // Ambient
     vec3 ambient = ambientColor.rgb * objectColor.rgb;
@@ -32,7 +36,9 @@ void main()
     vec3 norm = normalize(fragNormal);
     vec3 lightDirNormalized = normalize(lightDir);
     float diff = max(dot(norm, lightDirNormalized), 0.0);
-    vec3 diffuse = diff * lightColor.rgb * objectColor.rgb;
+    
+    // Apply Sky Light attenuation to Diffuse component
+    vec3 diffuse = diff * lightColor.rgb * objectColor.rgb * skyLight;
 
     // Result
     vec3 result = ambient + diffuse;
@@ -44,6 +50,6 @@ void main()
     // float fogFactor = clamp((fogEnd - dist) / (fogEnd - fogStart), 0.0, 1.0);
     // result = mix(vec3(0.5, 0.5, 0.5), result, fogFactor); // Blend with gray/sky color
 
-    finalColor = vec4(result, objectColor.a);
+    finalColor = vec4(result, texelColor.a);
 }
 
