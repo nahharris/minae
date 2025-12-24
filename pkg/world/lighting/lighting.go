@@ -1,8 +1,8 @@
 package lighting
 
 import (
-	"math"
 	_ "embed"
+	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"

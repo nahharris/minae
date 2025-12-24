@@ -56,13 +56,13 @@ func (u *UIManager) DrawPauseMenu(screenWidth, screenHeight int) (bool, bool) {
 	// Use Fixed Size for menu?
 	menuWidth := float32(200)
 	menuHeight := float32(160) // approx
-	
+
 	menuX := (float32(screenWidth) - menuWidth) / 2
 	menuY := (float32(screenHeight) - menuHeight) / 2
 
 	// Set bounds for root
 	u.pauseRoot.SetBounds(minui.Rect{X: menuX, Y: menuY, Width: menuWidth, Height: menuHeight})
-	
+
 	// Draw outline manually since Panel doesn't support it
 	rl.DrawRectangleLines(int32(menuX), int32(menuY), int32(menuWidth), int32(menuHeight), rl.Black)
 

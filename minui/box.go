@@ -35,4 +35,3 @@ func (b *Box) Draw() {
 func (b *Box) Update() {
 	// Box has no update logic
 }
-

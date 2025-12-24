@@ -6,17 +6,17 @@ import (
 
 // Button is a clickable component.
 type Button struct {
-	Text     string
-	OnClick  func()
-	Width    float32
-	Height   float32
-	
+	Text    string
+	OnClick func()
+	Width   float32
+	Height  float32
+
 	// Styles
 	NormalColor rl.Color
 	HoverColor  rl.Color
 	TextColor   rl.Color
-	
-	bounds   Rect
+
+	bounds    Rect
 	isHovered bool
 }
 
@@ -56,15 +56,14 @@ func (b *Button) Draw() {
 	if b.isHovered {
 		color = b.HoverColor
 	}
-	
+
 	rl.DrawRectangleRec(b.bounds.ToRaylib(), color)
-	
+
 	// Center text
 	fontSize := int32(20)
 	textWidth := rl.MeasureText(b.Text, fontSize)
 	textX := int32(b.bounds.X) + (int32(b.bounds.Width)-textWidth)/2
 	textY := int32(b.bounds.Y) + (int32(b.bounds.Height)-int32(fontSize))/2
-	
+
 	rl.DrawText(b.Text, textX, textY, fontSize, b.TextColor)
 }
-

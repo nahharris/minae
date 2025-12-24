@@ -35,7 +35,7 @@ func ApplyStackLayout(
 	}
 
 	rects := make([]Rect, count)
-	
+
 	currentX := pos.X + padding
 	currentY := pos.Y + padding
 
@@ -74,11 +74,11 @@ func ApplyStackLayout(
 	// Second pass: Position children
 	for i, size := range childrenSizes {
 		var x, y float32
-		
+
 		if direction == DirectionVertical {
 			// Vertical Stack
 			y = currentY
-			
+
 			// Alignment on Cross Axis (Horizontal)
 			switch alignment {
 			case AlignStart:
@@ -113,4 +113,3 @@ func ApplyStackLayout(
 
 	return rects, Size{Width: containerWidth, Height: containerHeight}
 }
-

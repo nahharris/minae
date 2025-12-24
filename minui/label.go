@@ -47,4 +47,3 @@ func (l *Label) Draw() {
 func (l *Label) Update() {
 	// Label has no update logic
 }
-

@@ -86,4 +86,3 @@ func TestApplyStackLayout_Horizontal_Center(t *testing.T) {
 		t.Errorf("Expected second rect Y 15, got %f", rects[1].Y)
 	}
 }
-

@@ -37,4 +37,3 @@ type Component interface {
 	// Update handles input and updates state.
 	Update()
 }
-
