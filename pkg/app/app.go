@@ -46,7 +46,7 @@ func NewGame(res *resource.Resources, dataFolder string) *Game {
 
 	// Initialize Renderer
 	renderer := render.NewSceneRenderer(res)
-	
+
 	// Initial mesh generation
 	log.Info("Generating initial meshes...")
 	for _, chunk := range w.Chunks {
@@ -110,7 +110,7 @@ func (g *Game) Update() {
 		// We moved interaction logic to world/interaction.go, but we need to call it.
 		// Player has runtime state (HasTarget, TargetBlock) but interaction logic needs to run.
 		// Let's call ProcessBlockInteraction.
-		
+
 		var action world.InteractionAction = world.ActionNone
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 			action = world.ActionBreak
@@ -119,14 +119,14 @@ func (g *Game) Update() {
 		}
 
 		// Get selected block from inventory
-		
+
 		inventoryBlock := g.Player.State.Inventory[g.Player.SelectedBlockIndex]
-		
+
 		// Determine meta (orientation/slab) - logic was in interaction.go but we need to pass placeMeta?
 		// interaction.go handles orientable logic inside ProcessBlockInteraction if we pass base meta (usually 0).
 		// Wait, ProcessBlockInteraction handles `MetaSlabTopBit` and `MetaFacingMask`.
 		// So we pass 0 as initial meta unless we have specific state.
-		
+
 		result := world.ProcessBlockInteraction(
 			g.World,
 			g.Player.Camera.Position,
@@ -180,14 +180,14 @@ func (g *Game) Draw() {
 
 	// Update Lighting Uniforms
 	skyColor, lightColor, ambientColor, lightDir := g.World.TimeOfDay.GetLightingState()
-	
+
 	rl.ClearBackground(skyColor)
 
 	g.Renderer.SetLighting(lightColor, ambientColor, lightDir)
-	
+
 	// Draw 3D Scene (meshes)
 	g.Renderer.Draw(g.Player.Camera)
-	
+
 	// Draw game-specific 3D elements
 	rl.BeginMode3D(g.Player.Camera)
 
@@ -196,7 +196,7 @@ func (g *Game) Draw() {
 		targetPos := rl.Vector3Add(g.Player.TargetBlock, rl.NewVector3(0.5, 0.5, 0.5))
 		rl.DrawCubeWires(targetPos, 1.01, 1.01, 1.01, rl.Black)
 	}
-	
+
 	// Debug: Draw Chunk Bounds
 	if g.UI.ShowDebug && g.UI.ShowAllUI {
 		g.Renderer.DrawDebugChunkBounds()
@@ -237,4 +237,3 @@ func (g *Game) Draw() {
 func (g *Game) Unload() {
 	g.Renderer.Unload()
 }
-
