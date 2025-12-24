@@ -1,11 +1,13 @@
 package world
 
 import (
+	"math"
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
+	"github.com/nahharris/minae/pkg/render/atlas"
 )
 
 // ChunkMeshData holds the raw data for a chunk mesh.
@@ -56,38 +58,13 @@ var meshBuilderPool = sync.Pool{
 	},
 }
 
-// Pre-computed face vertex offsets and normals to avoid allocations.
+// UVLookup provides atlas UV coordinates for a texture key.
+type UVLookup interface {
+	UV(key string) (atlas.UV, bool)
+}
+
+// Pre-computed face normals to avoid allocations.
 var (
-	faceRightV1 = rl.Vector3{X: 1, Y: 0, Z: 1}
-	faceRightV2 = rl.Vector3{X: 1, Y: 0, Z: 0}
-	faceRightV3 = rl.Vector3{X: 1, Y: 1, Z: 0}
-	faceRightV4 = rl.Vector3{X: 1, Y: 1, Z: 1}
-
-	faceLeftV1 = rl.Vector3{X: 0, Y: 0, Z: 0}
-	faceLeftV2 = rl.Vector3{X: 0, Y: 0, Z: 1}
-	faceLeftV3 = rl.Vector3{X: 0, Y: 1, Z: 1}
-	faceLeftV4 = rl.Vector3{X: 0, Y: 1, Z: 0}
-
-	faceTopV1 = rl.Vector3{X: 0, Y: 1, Z: 1}
-	faceTopV2 = rl.Vector3{X: 1, Y: 1, Z: 1}
-	faceTopV3 = rl.Vector3{X: 1, Y: 1, Z: 0}
-	faceTopV4 = rl.Vector3{X: 0, Y: 1, Z: 0}
-
-	faceBottomV1 = rl.Vector3{X: 0, Y: 0, Z: 0}
-	faceBottomV2 = rl.Vector3{X: 1, Y: 0, Z: 0}
-	faceBottomV3 = rl.Vector3{X: 1, Y: 0, Z: 1}
-	faceBottomV4 = rl.Vector3{X: 0, Y: 0, Z: 1}
-
-	faceFrontV1 = rl.Vector3{X: 0, Y: 0, Z: 1}
-	faceFrontV2 = rl.Vector3{X: 1, Y: 0, Z: 1}
-	faceFrontV3 = rl.Vector3{X: 1, Y: 1, Z: 1}
-	faceFrontV4 = rl.Vector3{X: 0, Y: 1, Z: 1}
-
-	faceBackV1 = rl.Vector3{X: 1, Y: 0, Z: 0}
-	faceBackV2 = rl.Vector3{X: 0, Y: 0, Z: 0}
-	faceBackV3 = rl.Vector3{X: 0, Y: 1, Z: 0}
-	faceBackV4 = rl.Vector3{X: 1, Y: 1, Z: 0}
-
 	normalTop    = rl.Vector3{X: 0, Y: 1, Z: 0}
 	normalBottom = rl.Vector3{X: 0, Y: -1, Z: 0}
 	normalLeft   = rl.Vector3{X: -1, Y: 0, Z: 0}
@@ -99,8 +76,8 @@ var (
 // CalculateChunkMesh generates the mesh data for the given chunk.
 // It performs face culling to remove invisible faces.
 // world: used to check neighbors across chunk boundaries.
-func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
-	builder := buildChunkMesh(chunk, world)
+func CalculateChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *ChunkMeshData {
+	builder := buildChunkMesh(chunk, world, uvLookup)
 	if builder == nil {
 		return nil
 	}
@@ -116,81 +93,90 @@ func CalculateChunkMesh(chunk *Chunk, world *World) *ChunkMeshData {
 	return data
 }
 
-func buildChunkMesh(chunk *Chunk, world *World) *meshBuilder {
+func buildChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *meshBuilder {
 	builder := meshBuilderPool.Get().(*meshBuilder)
 	builder.reset()
 	builder.ensureCapacity(chunk.meshHint)
 
-	addFace := func(x, y, z int, normal rl.Vector3, color rl.Color) {
+	addQuad := func(x, y, z int, q blocks.Quad, alpha uint8, uv atlas.UV) {
 		fx, fy, fz := float32(x), float32(y), float32(z)
 
-		var v1, v2, v3, v4 rl.Vector3
+		n := normalForFace(q.Face)
 
-		switch normal {
-		case normalRight:
-			v1, v2, v3, v4 = faceRightV1, faceRightV2, faceRightV3, faceRightV4
-		case normalLeft:
-			v1, v2, v3, v4 = faceLeftV1, faceLeftV2, faceLeftV3, faceLeftV4
-		case normalTop:
-			v1, v2, v3, v4 = faceTopV1, faceTopV2, faceTopV3, faceTopV4
-		case normalBottom:
-			v1, v2, v3, v4 = faceBottomV1, faceBottomV2, faceBottomV3, faceBottomV4
-		case normalFront:
-			v1, v2, v3, v4 = faceFrontV1, faceFrontV2, faceFrontV3, faceFrontV4
-		default: // normalBack
-			v1, v2, v3, v4 = faceBackV1, faceBackV2, faceBackV3, faceBackV4
-		}
-
+		p1, p2, p3, p4 := q.V1, q.V2, q.V3, q.V4
 		builder.vertices = append(builder.vertices,
-			fx+v1.X, fy+v1.Y, fz+v1.Z,
-			fx+v2.X, fy+v2.Y, fz+v2.Z,
-			fx+v3.X, fy+v3.Y, fz+v3.Z,
-			fx+v1.X, fy+v1.Y, fz+v1.Z,
-			fx+v3.X, fy+v3.Y, fz+v3.Z,
-			fx+v4.X, fy+v4.Y, fz+v4.Z,
+			fx+p1.X, fy+p1.Y, fz+p1.Z,
+			fx+p2.X, fy+p2.Y, fz+p2.Z,
+			fx+p3.X, fy+p3.Y, fz+p3.Z,
+			fx+p1.X, fy+p1.Y, fz+p1.Z,
+			fx+p3.X, fy+p3.Y, fz+p3.Z,
+			fx+p4.X, fy+p4.Y, fz+p4.Z,
 		)
 
 		for range 6 {
-			builder.normals = append(builder.normals, normal.X, normal.Y, normal.Z)
-			builder.colors = append(builder.colors, color.R, color.G, color.B, color.A)
+			builder.normals = append(builder.normals, n.X, n.Y, n.Z)
+			// RGB is white so textures show true colors; alpha encodes skylight (0..255).
+			builder.colors = append(builder.colors, 255, 255, 255, alpha)
 		}
 
+		u1, v1 := uvForVertex(q.Face, p1, uv)
+		u2, v2 := uvForVertex(q.Face, p2, uv)
+		u3, v3 := uvForVertex(q.Face, p3, uv)
+		u4, v4 := uvForVertex(q.Face, p4, uv)
+
 		builder.texcoords = append(builder.texcoords,
-			0, 0, 1, 0, 1, 1,
-			0, 0, 1, 1, 0, 1,
+			u1, v1, u2, v2, u3, v3,
+			u1, v1, u3, v3, u4, v4,
 		)
 	}
+
+	quads := make([]blocks.Quad, 0, 16)
 
 	for x := range config.ChunkWidth {
 		for y := range config.ChunkHeight {
 			for z := range config.ChunkWidth {
-				block := chunk.GetBlock(x, y, z)
-				if block == nil || isAir(block) {
+				block, meta := chunk.GetBlockState(x, y, z)
+				if block == nil {
 					continue
 				}
 
-				color := rl.GetColor(uint(block.Color))
-				gx, gy, gz := chunk.X*config.ChunkWidth+x, y, chunk.Z*config.ChunkWidth+z
-
-				checkNeighbor := func(dx, dy, dz int, normal rl.Vector3) {
-					neighbor := world.GetBlock(gx+dx, gy+dy, gz+dz)
-					if neighbor == nil || isAir(neighbor) {
-						// Get light level of the air block we are facing
-						light := world.GetLight(gx+dx, gy+dy, gz+dz)
-						// Map 0-15 to 0-255 using integer arithmetic to avoid precision issues
-						alpha := uint8((uint16(light) * 255) / 15)
-						faceColor := color
-						faceColor.A = alpha
-						addFace(x, y, z, normal, faceColor)
-					}
+				model := block.Model
+				if model == nil {
+					model = blocks.CompileModel(block.ID, block.ModelSpec)
 				}
 
-				checkNeighbor(0, 1, 0, normalTop)
-				checkNeighbor(0, -1, 0, normalBottom)
-				checkNeighbor(-1, 0, 0, normalLeft)
-				checkNeighbor(1, 0, 0, normalRight)
-				checkNeighbor(0, 0, 1, normalFront)
-				checkNeighbor(0, 0, -1, normalBack)
+				gx, gy, gz := chunk.X*config.ChunkWidth+x, y, chunk.Z*config.ChunkWidth+z
+
+				quads = model.AppendQuads(quads[:0], meta)
+				for _, q := range quads {
+					dx, dy, dz := offsetForFace(q.Face)
+					light := world.GetLight(gx+dx, gy+dy, gz+dz)
+					alpha := uint8((uint16(light) * 255) / 15)
+
+					if q.Cull {
+						neighbor, nmeta := world.GetBlockState(gx+dx, gy+dy, gz+dz)
+						if neighbor != nil {
+							nmodel := neighbor.Model
+							if nmodel == nil {
+								nmodel = blocks.CompileModel(neighbor.ID, neighbor.ModelSpec)
+							}
+
+							region := quadRegion(q)
+							if nmodel.Occludes(nmeta, q.Face.Opposite(), region) {
+								continue
+							}
+						}
+					}
+
+					uv := atlas.UV{U0: 0, V0: 0, U1: 1, V1: 1}
+					if uvLookup != nil && q.Texture != "" {
+						if r, ok := uvLookup.UV(q.Texture); ok {
+							uv = r
+						}
+					}
+
+					addQuad(x, y, z, q, alpha, uv)
+				}
 			}
 		}
 	}
@@ -211,14 +197,9 @@ func buildChunkMesh(chunk *Chunk, world *World) *meshBuilder {
 	return builder
 }
 
-// isAir checks if a block is essentially air.
-func isAir(b *blocks.Block) bool {
-	return b == nil || b.ID == "minae/air" || b.Name == "Air"
-}
-
 // GenerateChunkMesh generates and uploads a Raylib mesh.
-func GenerateChunkMesh(chunk *Chunk, world *World) *rl.Mesh {
-	builder := buildChunkMesh(chunk, world)
+func GenerateChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *rl.Mesh {
+	builder := buildChunkMesh(chunk, world, uvLookup)
 	if builder == nil {
 		return nil
 	}
@@ -241,4 +222,119 @@ func GenerateChunkMesh(chunk *Chunk, world *World) *rl.Mesh {
 
 	builder.release()
 	return &mesh
+}
+
+func normalForFace(face blocks.Face) rl.Vector3 {
+	switch face {
+	case blocks.FaceRight:
+		return normalRight
+	case blocks.FaceLeft:
+		return normalLeft
+	case blocks.FaceTop:
+		return normalTop
+	case blocks.FaceBottom:
+		return normalBottom
+	case blocks.FaceFront:
+		return normalFront
+	default:
+		return normalBack
+	}
+}
+
+func offsetForFace(face blocks.Face) (dx, dy, dz int) {
+	switch face {
+	case blocks.FaceRight:
+		return 1, 0, 0
+	case blocks.FaceLeft:
+		return -1, 0, 0
+	case blocks.FaceTop:
+		return 0, 1, 0
+	case blocks.FaceBottom:
+		return 0, -1, 0
+	case blocks.FaceFront:
+		return 0, 0, 1
+	default:
+		return 0, 0, -1
+	}
+}
+
+func quadRegion(q blocks.Quad) blocks.Rect {
+	minU, minV := float32(math.Inf(1)), float32(math.Inf(1))
+	maxU, maxV := float32(math.Inf(-1)), float32(math.Inf(-1))
+
+	vs := [4]blocks.Vec3{q.V1, q.V2, q.V3, q.V4}
+	for _, v := range vs {
+		var u, w float32
+		switch q.Face {
+		case blocks.FaceRight, blocks.FaceLeft:
+			u, w = v.Z, v.Y
+		case blocks.FaceFront, blocks.FaceBack:
+			u, w = v.X, v.Y
+		default: // Top/Bottom
+			u, w = v.X, v.Z
+		}
+
+		if u < minU {
+			minU = u
+		}
+		if w < minV {
+			minV = w
+		}
+		if u > maxU {
+			maxU = u
+		}
+		if w > maxV {
+			maxV = w
+		}
+	}
+
+	if math.IsInf(float64(minU), 1) || math.IsInf(float64(minV), 1) {
+		return blocks.Rect{}
+	}
+
+	return blocks.Rect{MinU: minU, MinV: minV, MaxU: maxU, MaxV: maxV}
+}
+
+func uvForVertex(face blocks.Face, v blocks.Vec3, r atlas.UV) (u, vt float32) {
+	localU, localV := float32(0), float32(0)
+
+	// Convention:
+	// - Texture origin is top-left (V increases downward).
+	// - On vertical faces, V=0 maps to world-up (Y=1), V=1 maps to world-down (Y=0).
+	switch face {
+	case blocks.FaceFront: // +Z
+		localU = 1 - v.X
+		localV = 1 - v.Y
+	case blocks.FaceBack: // -Z
+		localU = v.X
+		localV = 1 - v.Y
+	case blocks.FaceRight: // +X
+		localU = v.Z
+		localV = 1 - v.Y
+	case blocks.FaceLeft: // -X
+		localU = 1 - v.Z
+		localV = 1 - v.Y
+	case blocks.FaceTop: // +Y
+		localU = v.X
+		localV = v.Z
+	default: // blocks.FaceBottom (-Y)
+		localU = v.X
+		localV = 1 - v.Z
+	}
+
+	// Clamp to avoid tiny floating errors from rotations.
+	if localU < 0 {
+		localU = 0
+	} else if localU > 1 {
+		localU = 1
+	}
+	if localV < 0 {
+		localV = 0
+	} else if localV > 1 {
+		localV = 1
+	}
+
+	u = r.U0 + (r.U1-r.U0)*localU
+	vt = r.V0 + (r.V1-r.V0)*localV
+	return u, vt
 }

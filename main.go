@@ -47,7 +47,7 @@ func main() {
 	// Initial cursor state handled by Game
 
 	// Initialize Game
-	g := game.NewGame()
+	g := game.NewGame(dataFolder)
 	defer g.Unload()
 
 	// Main Game Loop

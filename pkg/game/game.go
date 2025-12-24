@@ -1,9 +1,12 @@
 package game
 
 import (
+	"log"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/player"
+	"github.com/nahharris/minae/pkg/render/atlas"
 	"github.com/nahharris/minae/pkg/ui"
 	"github.com/nahharris/minae/pkg/world"
 	"github.com/nahharris/minae/pkg/world/lighting"
@@ -29,6 +32,7 @@ type Game struct {
 	Lighting      *lighting.Manager
 	Shader        rl.Shader
 	ChunkMaterial rl.Material
+	Atlas         *atlas.Atlas
 
 	// Shader Locations
 	LocLightDir   int32
@@ -44,7 +48,7 @@ type Game struct {
 }
 
 // NewGame initializes the game systems.
-func NewGame() *Game {
+func NewGame(dataFolder string) *Game {
 	// Initialize Player
 	// Start at 0, 40, 0 to be above the ground (generated up to y=32)
 	p := player.NewPlayer(rl.NewVector3(0, 40, 0))
@@ -77,6 +81,18 @@ func NewGame() *Game {
 	mat := rl.LoadMaterialDefault()
 	mat.Shader = shader
 
+	// Build texture atlas (PNG + fallback) and bind it as the diffuse texture.
+	var texAtlas *atlas.Atlas
+	if dataFolder != "" {
+		a, err := atlas.Build(dataFolder)
+		if err != nil {
+			log.Printf("Warning: failed to build texture atlas: %v. Falling back to default texture.", err)
+		} else {
+			texAtlas = a
+			mat.GetMap(int32(rl.MapDiffuse)).Texture = a.Texture
+		}
+	}
+
 	g := &Game{
 		Player:           p,
 		World:            w,
@@ -87,6 +103,7 @@ func NewGame() *Game {
 		Lighting:         l,
 		Shader:           shader,
 		ChunkMaterial:    mat,
+		Atlas:            texAtlas,
 		LocLightDir:      locLightDir,
 		LocLightColor:    locLightColor,
 		LocAmbient:       locAmbient,
@@ -105,7 +122,7 @@ func NewGame() *Game {
 // generateMeshes generates meshes for all chunks in the world.
 func (g *Game) generateMeshes() {
 	for coord, chunk := range g.World.Chunks {
-		mesh := world.GenerateChunkMesh(chunk, g.World)
+		mesh := world.GenerateChunkMesh(chunk, g.World, g.Atlas)
 		if mesh != nil {
 			g.ChunkMeshes[coord] = mesh
 		}
@@ -181,7 +198,7 @@ func (g *Game) Update() {
 					rl.UnloadMesh(oldMesh)
 				}
 
-				newMesh := world.GenerateChunkMesh(chunk, g.World)
+				newMesh := world.GenerateChunkMesh(chunk, g.World, g.Atlas)
 				if newMesh != nil {
 					g.ChunkMeshes[coord] = newMesh
 				} else {
@@ -285,6 +302,9 @@ func (g *Game) Draw() {
 // Unload cleans up resources.
 func (g *Game) Unload() {
 	rl.UnloadShader(g.Shader)
+	if g.Atlas != nil && g.Atlas.Texture.ID != 0 {
+		rl.UnloadTexture(g.Atlas.Texture)
+	}
 	for _, mesh := range g.ChunkMeshes {
 		rl.UnloadMesh(mesh)
 	}
