@@ -2,6 +2,9 @@
 go = "1.25"
 golangci-lint = "latest"
 
+[env]
+MINAE_DATA_FOLDER = "data"
+
 [tasks.build]
 run = "go build -o bin/main main.go"
 run_windows = "go build -o bin/main.exe main.go"

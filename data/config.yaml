@@ -1,0 +1,8 @@
+screen_width: 1280
+screen_height: 720
+target_fps: 60
+fov: 60
+player_speed: 10
+mouse_sens: 0.003
+player_arm_length: 5
+day_cycle_duration: 600
