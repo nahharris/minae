@@ -64,14 +64,24 @@ func Register(b *Block) *Block {
 	globalRegistry.mu.Lock()
 	defer globalRegistry.mu.Unlock()
 
+	if b == nil {
+		return nil
+	}
+
+	b.ensureModel()
+
 	if existing, ok := globalRegistry.blocks[b.ID]; ok {
 		existing.Name = b.Name
 		existing.Color = b.Color
+		existing.ModelSpec = b.ModelSpec
+		existing.Model = b.Model
+		existing.ensureModel()
 		return existing
 	}
 
 	id := globalRegistry.allocateID(b.ID)
 	b.numericID = id
+	b.ensureModel()
 
 	globalRegistry.blocks[b.ID] = b
 	globalRegistry.ids[b.ID] = id
@@ -157,11 +167,18 @@ func Load(dataFolder string) error {
 		}
 
 		var block Block
+		// Start from existing definition (if any) so that partial YAML overrides
+		// don't unintentionally zero fields like model settings.
+		if existing := Get(id); existing != nil {
+			block = *existing
+		}
 		if err := yaml.Unmarshal(data, &block); err != nil {
 			return fmt.Errorf("failed to parse block file %s: %w", path, err)
 		}
 
 		block.ID = id
+		// Recompile the model after applying YAML overrides.
+		block.Model = nil
 		Register(&block) // This will overwrite if exists
 		return nil
 	})
