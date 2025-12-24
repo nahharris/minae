@@ -75,6 +75,19 @@ func (w *World) GetBlock(x, y, z int) *blocks.Block {
 	return chunk.GetBlock(localX, y, localZ)
 }
 
+// GetBlockState returns the block type and per-instance metadata at the given global coordinates.
+// Returns (nil, 0) if the chunk is missing or the position is air/out of bounds.
+func (w *World) GetBlockState(x, y, z int) (*blocks.Block, uint8) {
+	chunkX, localX := worldToLocal(x)
+	chunkZ, localZ := worldToLocal(z)
+
+	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
+	if !exists {
+		return nil, 0
+	}
+	return chunk.GetBlockState(localX, y, localZ)
+}
+
 // GetLight returns the light level at the global world coordinates.
 func (w *World) GetLight(x, y, z int) uint8 {
 	chunkX, localX := worldToLocal(x)
@@ -107,6 +120,12 @@ func (w *World) GetChunk(x, z int) *Chunk {
 // SetBlock sets the block type at the global world coordinates.
 // Returns a list of chunk coordinates that need to be re-meshed.
 func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
+	return w.SetBlockState(x, y, z, b, 0)
+}
+
+// SetBlockState sets the block type and per-instance metadata at the given global coordinates.
+// Returns a list of chunk coordinates that need to be re-meshed.
+func (w *World) SetBlockState(x, y, z int, b *blocks.Block, meta uint8) []ChunkCoord {
 	if y < 0 || y >= config.ChunkHeight {
 		return nil
 	}
@@ -120,7 +139,7 @@ func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
 		return nil
 	}
 
-	if !chunk.SetBlock(localX, y, localZ, b) {
+	if !chunk.SetBlockState(localX, y, localZ, b, meta) {
 		return nil
 	}
 
