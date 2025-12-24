@@ -2,7 +2,6 @@ package app
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/logging"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/render"
@@ -185,16 +184,12 @@ func (g *Game) Draw() {
 	rl.ClearBackground(skyColor)
 
 	g.Renderer.SetLighting(lightColor, ambientColor, lightDir)
-	g.Renderer.SetViewPosition(g.Player.Camera)
 	
-	// Draw 3D Scene
+	// Draw 3D Scene (meshes)
+	g.Renderer.Draw(g.Player.Camera)
+	
+	// Draw game-specific 3D elements
 	rl.BeginMode3D(g.Player.Camera)
-	
-	// Draw meshes
-	for coord, mesh := range g.Renderer.ChunkMeshes {
-		pos := rl.NewVector3(float32(coord.X*config.ChunkWidth), 0, float32(coord.Z*config.ChunkWidth))
-		rl.DrawMesh(*mesh, g.Renderer.Material, rl.MatrixTranslate(pos.X, pos.Y, pos.Z))
-	}
 
 	// Draw Selection Highlight
 	if g.Player.HasTarget {

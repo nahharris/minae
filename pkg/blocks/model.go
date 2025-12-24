@@ -380,7 +380,7 @@ func rotateFaceY(face Face, steps int) Face {
 		return face
 	}
 
-	for ; steps > 0; steps-- {
+	for i := 0; i < steps; i++ {
 		switch face {
 		case FaceFront:
 			face = FaceRight
