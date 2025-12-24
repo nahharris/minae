@@ -160,6 +160,7 @@ func (p *Player) HandleBlockInteraction(w *world.World) []world.ChunkCoord {
 		placePos := [3]int{pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]}
 		if len(p.Inventory) > 0 {
 			selectedBlock := p.Inventory[p.SelectedBlockIndex]
+			var meta uint8
 
 			// Don't place inside the player
 			playerPos := p.Camera.Position
@@ -169,7 +170,49 @@ func (p *Player) HandleBlockInteraction(w *world.World) []world.ChunkCoord {
 				return nil
 			}
 
-			return w.SetBlock(placePos[0], placePos[1], placePos[2], selectedBlock)
+			// Slab placement: decide top/bottom from the face we placed against.
+			if selectedBlock.ModelSpec.Type == "slab" {
+				if face[1] == -1 {
+					// Placing below a block => slab occupies top half.
+					meta |= blocks.MetaSlabTopBit
+				}
+			}
+
+			// Orientable placement: 4-way facing derived from camera yaw.
+			// We make the block face the player (common Minecraft behavior).
+			if selectedBlock.ModelSpec.Orientable {
+				view := rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
+				view.Y = 0
+				// Invert so "front" points toward the player.
+				view.X = -view.X
+				view.Z = -view.Z
+
+				if rl.Vector3Length(view) > 0 {
+					view = rl.Vector3Normalize(view)
+				}
+
+				ax := float32(math.Abs(float64(view.X)))
+				az := float32(math.Abs(float64(view.Z)))
+
+				var facing uint8 // 0:+Z, 1:+X, 2:-Z, 3:-X
+				if az >= ax {
+					if view.Z >= 0 {
+						facing = 0
+					} else {
+						facing = 2
+					}
+				} else {
+					if view.X >= 0 {
+						facing = 1
+					} else {
+						facing = 3
+					}
+				}
+
+				meta = (meta &^ blocks.MetaFacingMask) | (facing & blocks.MetaFacingMask)
+			}
+
+			return w.SetBlockState(placePos[0], placePos[1], placePos[2], selectedBlock, meta)
 		}
 	}
 
