@@ -6,8 +6,8 @@ var (
 	Air       = Register(&Block{ID: "minae/air", Name: "Air", Color: 0x00000000})
 	Stone     = Register(&Block{ID: "minae/stone", Name: "Stone", Color: 0x828282FF})
 	StoneSlab = Register(&Block{
-		ID: "minae/stone_slab",
-		Name: "Stone Slab",
+		ID:    "minae/stone_slab",
+		Name:  "Stone Slab",
 		Color: 0x828282FF,
 		ModelSpec: ModelSpec{
 			Type: "slab",

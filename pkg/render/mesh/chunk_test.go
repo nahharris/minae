@@ -1,26 +1,28 @@
-package world
+package mesh_test
 
 import (
 	"testing"
 
 	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/render/atlas"
+	"github.com/nahharris/minae/pkg/render/mesh"
+	"github.com/nahharris/minae/pkg/world"
 )
 
-func TestCalculateChunkMesh_Culling(t *testing.T) {
+func TestGenerateChunkMeshData_Culling(t *testing.T) {
 	blocks.Reset()
 	stone := blocks.Stone
 	blocks.Register(stone)
 
-	w := NewWorld()
-	c := NewChunk(0, 0)
-	w.Chunks[ChunkCoord{0, 0}] = c
+	w := world.NewWorld()
+	c := world.NewChunk(0, 0)
+	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 	// Place a single block at 8,8,8
 	// It should have all 6 faces visible (since neighbors are air)
 	c.SetBlock(8, 8, 8, stone)
 
-	data := CalculateChunkMesh(c, w, nil)
+	data := mesh.GenerateChunkMeshData(c, w, nil)
 
 	if data == nil {
 		t.Fatal("Expected mesh data, got nil")
@@ -36,7 +38,7 @@ func TestCalculateChunkMesh_Culling(t *testing.T) {
 	c.SetBlock(8, 9, 8, stone)
 
 	// Recalculate
-	data = CalculateChunkMesh(c, w, nil)
+	data = mesh.GenerateChunkMeshData(c, w, nil)
 
 	// Bottom block (8,8,8): Top face hidden. 5 faces.
 	// Top block (8,9,8): Bottom face hidden. 5 faces.
@@ -47,18 +49,18 @@ func TestCalculateChunkMesh_Culling(t *testing.T) {
 	}
 }
 
-func TestCalculateChunkMesh_Empty(t *testing.T) {
-	w := NewWorld()
-	c := NewChunk(0, 0)
-	w.Chunks[ChunkCoord{0, 0}] = c
+func TestGenerateChunkMeshData_Empty(t *testing.T) {
+	w := world.NewWorld()
+	c := world.NewChunk(0, 0)
+	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
-	data := CalculateChunkMesh(c, w, nil)
+	data := mesh.GenerateChunkMeshData(c, w, nil)
 	if data != nil {
 		t.Error("Expected nil mesh for empty chunk")
 	}
 }
 
-func TestCalculateChunkMesh_Slab_CullingDependsOnOverlap(t *testing.T) {
+func TestGenerateChunkMeshData_Slab_CullingDependsOnOverlap(t *testing.T) {
 	blocks.Reset()
 
 	slab := blocks.Register(&blocks.Block{
@@ -70,9 +72,9 @@ func TestCalculateChunkMesh_Slab_CullingDependsOnOverlap(t *testing.T) {
 		},
 	})
 
-	w := NewWorld()
-	c := NewChunk(0, 0)
-	w.Chunks[ChunkCoord{0, 0}] = c
+	w := world.NewWorld()
+	c := world.NewChunk(0, 0)
+	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 	set := func(x int, meta uint8) {
 		ok := c.SetBlockState(x, 8, 8, slab, meta)
@@ -85,7 +87,7 @@ func TestCalculateChunkMesh_Slab_CullingDependsOnOverlap(t *testing.T) {
 		set(8, 0)
 		set(9, 0)
 
-		data := CalculateChunkMesh(c, w, nil)
+		data := mesh.GenerateChunkMeshData(c, w, nil)
 		if data == nil {
 			t.Fatal("expected mesh data, got nil")
 		}
@@ -98,8 +100,8 @@ func TestCalculateChunkMesh_Slab_CullingDependsOnOverlap(t *testing.T) {
 
 	t.Run("bottom+top_sharedFaceVisible", func(t *testing.T) {
 		// Clear the chunk.
-		c = NewChunk(0, 0)
-		w.Chunks[ChunkCoord{0, 0}] = c
+		c = world.NewChunk(0, 0)
+		w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 		set = func(x int, meta uint8) {
 			ok := c.SetBlockState(x, 8, 8, slab, meta)
@@ -111,7 +113,7 @@ func TestCalculateChunkMesh_Slab_CullingDependsOnOverlap(t *testing.T) {
 		set(8, 0)
 		set(9, blocks.MetaSlabTopBit)
 
-		data := CalculateChunkMesh(c, w, nil)
+		data := mesh.GenerateChunkMeshData(c, w, nil)
 		if data == nil {
 			t.Fatal("expected mesh data, got nil")
 		}
@@ -134,7 +136,7 @@ func (d dummyUVLookup) UV(key string) (atlas.UV, bool) {
 	return atlas.UV{}, false
 }
 
-func TestCalculateChunkMesh_UsesUVLookup(t *testing.T) {
+func TestGenerateChunkMeshData_UsesUVLookup(t *testing.T) {
 	blocks.Reset()
 	texBlock := blocks.Register(&blocks.Block{
 		ID:        "test/tex",
@@ -143,9 +145,9 @@ func TestCalculateChunkMesh_UsesUVLookup(t *testing.T) {
 		ModelSpec: blocks.ModelSpec{Type: "full"},
 	})
 
-	w := NewWorld()
-	c := NewChunk(0, 0)
-	w.Chunks[ChunkCoord{0, 0}] = c
+	w := world.NewWorld()
+	c := world.NewChunk(0, 0)
+	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 	c.SetBlock(0, 0, 0, texBlock)
 
@@ -153,7 +155,7 @@ func TestCalculateChunkMesh_UsesUVLookup(t *testing.T) {
 		uv: atlas.UV{U0: 0.25, V0: 0.5, U1: 0.5, V1: 0.75},
 	}
 
-	data := CalculateChunkMesh(c, w, lookup)
+	data := mesh.GenerateChunkMeshData(c, w, lookup)
 	if data == nil {
 		t.Fatal("expected mesh data, got nil")
 	}

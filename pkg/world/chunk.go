@@ -21,14 +21,17 @@ func NewChunk(x, z int) *Chunk {
 		X: x,
 		Z: z,
 	}
-	// Initialize with Air (assuming air is nil or a specific block)
-	// If we want explicit air blocks, we should set them here.
-	// For now, let's assume nil means "Air" or default, but better to be explicit if possible.
-	// However, since we are using pointers, nil is a valid state for "nothing".
-	// But "Air" is usually a block type. Let's try to use the "minae/air" block if available,
-	// or handle nil as air.
-	// For safety, let's fill with nil and handle nil as Air in GetBlock.
 	return c
+}
+
+// ChunkX returns the X coordinate of the chunk.
+func (c *Chunk) ChunkX() int {
+	return c.X
+}
+
+// ChunkZ returns the Z coordinate of the chunk.
+func (c *Chunk) ChunkZ() int {
+	return c.Z
 }
 
 func (c *Chunk) InBounds(x, y, z int) bool {

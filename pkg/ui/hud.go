@@ -32,7 +32,7 @@ func (u *UIManager) DrawHUD(screenWidth, screenHeight int) {
 	hotbar := u.hudRoot.(*minui.Panel)
 	hotbar.Children = nil // Clear
 
-	for i, block := range u.Player.Inventory {
+	for i, block := range u.Player.State.Inventory {
 		// Create a container for the slot to handle background highlighting
 		slot := minui.NewPanel()
 		slot.Direction = minui.DirectionHorizontal

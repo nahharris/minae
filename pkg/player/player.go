@@ -4,7 +4,6 @@ import (
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/nahharris/minae/pkg/blocks"
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/world"
 )
@@ -12,33 +11,45 @@ import (
 // Player represents the first-person character in the game.
 // It handles camera movement and input processing.
 type Player struct {
-	Camera           rl.Camera3D
+	State            *world.PlayerState // Reference to world's saveable state
+	Camera           rl.Camera3D        // Runtime-only
 	MovementSpeed    float32
 	MouseSensitivity float32
 
-	// Interaction & Inventory
-	Inventory          []*blocks.Block
+	// Runtime Interaction State
 	SelectedBlockIndex int
 	TargetBlock        rl.Vector3
 	HasTarget          bool
 }
 
-// NewPlayer creates a new Player instance with default settings.
-// position: The starting position of the player.
-func NewPlayer(position rl.Vector3) *Player {
+// NewPlayer creates a new Player instance wrapping the given state.
+func NewPlayer(state *world.PlayerState) *Player {
 	camera := rl.Camera3D{}
-	camera.Position = position
-	camera.Target = rl.Vector3Add(position, rl.NewVector3(1.0, 0.0, 0.0)) // Looking along +X
+	// Position initialized from state
+	camera.Position = rl.NewVector3(state.Position[0], state.Position[1], state.Position[2])
+	camera.Target = rl.Vector3Add(camera.Position, rl.NewVector3(1.0, 0.0, 0.0)) // Looking along +X
 	camera.Up = rl.NewVector3(0.0, 1.0, 0.0)
 	camera.Fovy = config.Current.FOV
 	camera.Projection = rl.CameraPerspective
 
 	return &Player{
+		State:            state,
 		Camera:           camera,
 		MovementSpeed:    config.Current.PlayerSpeed,
 		MouseSensitivity: config.Current.MouseSens,
-		Inventory:        blocks.GetAll(),
 	}
+}
+
+// SyncFromState updates the camera position from the saveable state.
+// Call this when loading a game.
+func (p *Player) SyncFromState() {
+	p.Camera.Position = rl.NewVector3(p.State.Position[0], p.State.Position[1], p.State.Position[2])
+}
+
+// SyncToState updates the saveable state from the camera position.
+// Call this before saving.
+func (p *Player) SyncToState() {
+	p.State.Position = [3]float32{p.Camera.Position.X, p.Camera.Position.Y, p.Camera.Position.Z}
 }
 
 // Update handles player input and updates the camera position and orientation.
@@ -46,11 +57,6 @@ func NewPlayer(position rl.Vector3) *Player {
 func (p *Player) Update(dt float32) {
 	// Mouse input for looking around
 	mouseDelta := rl.GetMouseDelta()
-
-	// Raylib Camera update mode only works if we use UpdateCamera.
-	// However, for custom FPS control, we might want to manipulate target/position directly.
-	// For simplicity and "fly mode", we can use rl.UpdateCameraPro or manual calculation.
-	// Let's implement manual calculation for clarity and control.
 
 	// Rotate the camera based on mouse movement
 	p.rotateCamera(-mouseDelta.X*p.MouseSensitivity, -mouseDelta.Y*p.MouseSensitivity)
@@ -89,6 +95,20 @@ func (p *Player) Update(dt float32) {
 		velocity := rl.Vector3Scale(moveDir, p.MovementSpeed*dt)
 		p.Camera.Position = rl.Vector3Add(p.Camera.Position, velocity)
 		p.Camera.Target = rl.Vector3Add(p.Camera.Target, velocity)
+
+		// Sync position back to state immediately for now
+		p.SyncToState()
+	}
+
+	// Inventory Selection
+	mouseWheel := rl.GetMouseWheelMove()
+	if mouseWheel != 0 {
+		p.SelectedBlockIndex -= int(mouseWheel)
+		if p.SelectedBlockIndex < 0 {
+			p.SelectedBlockIndex = len(p.State.Inventory) - 1
+		} else if p.SelectedBlockIndex >= len(p.State.Inventory) {
+			p.SelectedBlockIndex = 0
+		}
 	}
 }
 
@@ -122,99 +142,4 @@ func (p *Player) rotateCamera(yaw, pitch float32) {
 	direction.Z = r * float32(math.Cos(float64(theta))) * float32(math.Cos(float64(phi)))
 
 	p.Camera.Target = rl.Vector3Add(p.Camera.Position, direction)
-}
-
-// HandleBlockInteraction processes mouse input for block breaking and placing.
-// It returns a list of chunk coordinates that need to be re-meshed.
-func (p *Player) HandleBlockInteraction(w *world.World) []world.ChunkCoord {
-	// Handle inventory selection
-	mouseWheel := rl.GetMouseWheelMove()
-	if mouseWheel != 0 {
-		p.SelectedBlockIndex -= int(mouseWheel)
-		if p.SelectedBlockIndex < 0 {
-			p.SelectedBlockIndex = len(p.Inventory) - 1
-		} else if p.SelectedBlockIndex >= len(p.Inventory) {
-			p.SelectedBlockIndex = 0
-		}
-	}
-
-	// Raycast
-	dir := rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
-	dir = rl.Vector3Normalize(dir)
-
-	hit, pos, face, _ := w.Raycast(p.Camera.Position, dir, config.Current.PlayerArmLength)
-
-	p.HasTarget = hit
-	if hit {
-		p.TargetBlock = rl.NewVector3(float32(pos[0]), float32(pos[1]), float32(pos[2]))
-	} else {
-		return nil
-	}
-
-	// Mouse Input
-	if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
-		// Break block
-		return w.SetBlock(pos[0], pos[1], pos[2], blocks.Air)
-	} else if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-		// Place block
-		placePos := [3]int{pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]}
-		if len(p.Inventory) > 0 {
-			selectedBlock := p.Inventory[p.SelectedBlockIndex]
-			var meta uint8
-
-			// Don't place inside the player
-			playerPos := p.Camera.Position
-			if int(math.Floor(float64(playerPos.X))) == placePos[0] &&
-				int(math.Floor(float64(playerPos.Y))) == placePos[1] &&
-				int(math.Floor(float64(playerPos.Z))) == placePos[2] {
-				return nil
-			}
-
-			// Slab placement: decide top/bottom from the face we placed against.
-			if selectedBlock.ModelSpec.Type == "slab" {
-				if face[1] == -1 {
-					// Placing below a block => slab occupies top half.
-					meta |= blocks.MetaSlabTopBit
-				}
-			}
-
-			// Orientable placement: 4-way facing derived from camera yaw.
-			// We make the block face the player (common Minecraft behavior).
-			if selectedBlock.ModelSpec.Orientable {
-				view := rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
-				view.Y = 0
-				// Invert so "front" points toward the player.
-				view.X = -view.X
-				view.Z = -view.Z
-
-				if rl.Vector3Length(view) > 0 {
-					view = rl.Vector3Normalize(view)
-				}
-
-				ax := float32(math.Abs(float64(view.X)))
-				az := float32(math.Abs(float64(view.Z)))
-
-				var facing uint8 // 0:+Z, 1:+X, 2:-Z, 3:-X
-				if az >= ax {
-					if view.Z >= 0 {
-						facing = 0
-					} else {
-						facing = 2
-					}
-				} else {
-					if view.X >= 0 {
-						facing = 1
-					} else {
-						facing = 3
-					}
-				}
-
-				meta = (meta &^ blocks.MetaFacingMask) | (facing & blocks.MetaFacingMask)
-			}
-
-			return w.SetBlockState(placePos[0], placePos[1], placePos[2], selectedBlock, meta)
-		}
-	}
-
-	return nil
 }

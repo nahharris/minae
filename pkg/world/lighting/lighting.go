@@ -2,10 +2,9 @@ package lighting
 
 import (
 	_ "embed"
-	"math"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/pkg/config"
+	"github.com/nahharris/minae/pkg/world"
 )
 
 //go:embed shaders/vertex.glsl
@@ -14,162 +13,162 @@ var VsCode string
 //go:embed shaders/fragment.glsl
 var FsCode string
 
-// DayState represents the lighting configuration at a specific time of day.
-type DayState struct {
-	SkyColor     rl.Color
-	SunColor     rl.Color
-	AmbientColor rl.Color
-	SunIntensity float32 // Used to scale lightColor if needed, or passed to shader
-	PeakTime     float32
-	NextState    *DayState
+// LightNode represents a position in the BFS queue
+type LightNode struct {
+	X, Y, Z int
+	Level   uint8
 }
 
-// lerpColor interpolates between two colors
-func lerpColor(c1, c2 rl.Color, t float32) rl.Color {
-	return rl.Color{
-		R: uint8(lerpFloat(float32(c1.R), float32(c2.R), t)),
-		G: uint8(lerpFloat(float32(c1.G), float32(c2.G), t)),
-		B: uint8(lerpFloat(float32(c1.B), float32(c2.B), t)),
-		A: uint8(lerpFloat(float32(c1.A), float32(c2.A), t)),
-	}
+var directions = [][3]int{
+	{1, 0, 0}, {-1, 0, 0},
+	{0, 1, 0}, {0, -1, 0},
+	{0, 0, 1}, {0, 0, -1},
 }
 
-// lerpFloat interpolates between two floats
-func lerpFloat(f1, f2 float32, t float32) float32 {
-	return f1 + (f2-f1)*t
-}
+// CalculateChunkLighting calculates the static skylight propagation for a single chunk.
+// Note: For a full infinite world, this needs to handle cross-chunk propagation more robustly (e.g., lighting updates).
+// But for generation, this works if we generate neighbors or handle boundaries.
+func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
+	// Queue for BFS. Pre-allocate capacity based on chunk dimensions to reduce reallocations.
+	queue := make([]LightNode, 0, config.ChunkWidth*config.ChunkWidth*config.ChunkHeight+4*config.ChunkWidth)
 
-// LerpColors interpolates the colors between this state and the next state at the provided hour.
-func (s *DayState) LerpColors(hour float32) (sky, sun, ambient rl.Color, intensity float32) {
-	if s.NextState == nil {
-		return s.SkyColor, s.SunColor, s.AmbientColor, s.SunIntensity
-	}
+	// 1. Initialize Skylight
+	// Go top-down. Sunlight hits the first solid block.
+	// Anything above the first solid block gets 15.
+	// The first solid block and below get 0 (initially).
+	for x := range config.ChunkWidth {
+		for z := range config.ChunkWidth {
+			// Start from top
+			lightLevel := uint8(15)
+			for y := config.ChunkHeight - 1; y >= 0; y-- {
+				block := chunk.GetBlock(x, y, z)
 
-	next := s.NextState
-	den := next.PeakTime - s.PeakTime
-	if den == 0 {
-		return next.SkyColor, next.SunColor, next.AmbientColor, next.SunIntensity
-	}
+				// Determine if block is transparent (can pass light)
+				// For now, nil or "Air" is transparent. Leaves/Glass could be too.
+				isTransparent := block == nil || block.ID == "minae/air" || block.Name == "Air"
 
-	t := (hour - s.PeakTime) / den
-	return lerpColor(s.SkyColor, next.SkyColor, t),
-		lerpColor(s.SunColor, next.SunColor, t),
-		lerpColor(s.AmbientColor, next.AmbientColor, t),
-		lerpFloat(s.SunIntensity, next.SunIntensity, t)
-}
-
-var (
-	// Key States
-	nightState = &DayState{
-		SkyColor:     rl.NewColor(10, 10, 30, 255),
-		SunColor:     rl.NewColor(20, 20, 40, 255), // Moon light
-		AmbientColor: rl.NewColor(10, 10, 20, 255),
-		SunIntensity: 0.2,
-		PeakTime:     0.8,
-		NextState:    nil,
-	}
-	sunsetState = &DayState{
-		SkyColor:     rl.NewColor(255, 100, 50, 255),
-		SunColor:     rl.NewColor(255, 150, 100, 255),
-		AmbientColor: rl.NewColor(80, 50, 50, 255),
-		SunIntensity: 0.6,
-		PeakTime:     0.75,
-		NextState:    nightState,
-	}
-	afternoonState = &DayState{
-		SkyColor:     rl.NewColor(255, 210, 140, 255), // Soft orange-yellow sky
-		SunColor:     rl.NewColor(255, 230, 180, 255), // Pale orange sun
-		AmbientColor: rl.NewColor(200, 170, 110, 255), // Warm orange ambient
-		SunIntensity: 1.0,
-		PeakTime:     0.7,
-		NextState:    sunsetState,
-	}
-	noonState = &DayState{
-		SkyColor:     rl.NewColor(135, 206, 235, 255),
-		SunColor:     rl.NewColor(255, 255, 255, 255),
-		AmbientColor: rl.NewColor(100, 100, 100, 255),
-		SunIntensity: 1.0,
-		PeakTime:     0.5,
-		NextState:    afternoonState,
-	}
-	morningState = &DayState{
-		SkyColor:     rl.NewColor(200, 220, 255, 255), // Soft white-blue morning sky
-		SunColor:     rl.NewColor(230, 220, 200, 255), // Gentle, warmer morning sun
-		AmbientColor: rl.NewColor(120, 140, 170, 255), // Softer blue ambient for morning
-		SunIntensity: 0.7,
-		PeakTime:     0.3,
-		NextState:    noonState,
-	}
-	sunriseState = &DayState{
-		SkyColor:     rl.NewColor(255, 180, 100, 255),
-		SunColor:     rl.NewColor(255, 200, 100, 255),
-		AmbientColor: rl.NewColor(80, 60, 60, 255),
-		SunIntensity: 0.6,
-		PeakTime:     0.25,
-		NextState:    morningState,
-	}
-	dawnState = &DayState{
-		SkyColor:     nightState.SkyColor,
-		SunColor:     nightState.SunColor,
-		AmbientColor: nightState.AmbientColor,
-		SunIntensity: nightState.SunIntensity,
-		PeakTime:     0.2,
-		NextState:    sunriseState,
-	}
-)
-
-var dayStates = []*DayState{
-	dawnState,
-	sunriseState,
-	morningState,
-	noonState,
-	afternoonState,
-	sunsetState,
-}
-
-type Manager struct {
-	Time          float32 // Current time in seconds
-	CycleDuration float32 // Total duration of a day in seconds
-}
-
-func NewManager() *Manager {
-	return &Manager{
-		Time:          config.Current.DayCycleDuration * 0.25, // Start at 6am (Sunrise approx)
-		CycleDuration: config.Current.DayCycleDuration,
-	}
-}
-
-func (m *Manager) Update(dt float32) {
-	m.Time += dt
-	for m.Time >= m.CycleDuration {
-		m.Time -= m.CycleDuration
-	}
-}
-
-func (m *Manager) GetState() (skyColor, lightColor, ambientColor rl.Color, lightDir rl.Vector3) {
-	// Map time to 0-24 hour scale for easier reasoning
-	hour := (m.Time / m.CycleDuration)
-
-	state := getStateFromTime(hour)
-	skyColor, lightColor, ambientColor, _ = state.LerpColors(hour)
-	// Calculate Sun Direction
-	// Angle 0 at 6am.
-	angle := hour * 2.0 * math.Pi
-
-	sinVal := float32(math.Sin(float64(angle)))
-	cosVal := float32(math.Cos(float64(angle)))
-
-	lightDir = rl.Vector3{X: cosVal, Y: sinVal, Z: 0.2} // Slight Z tilt
-	lightDir = rl.Vector3Normalize(lightDir)
-
-	return
-}
-
-func getStateFromTime(hour float32) *DayState {
-	for _, state := range dayStates {
-		if hour >= state.PeakTime && (state.NextState == nil || hour < state.NextState.PeakTime) {
-			return state
+				if isTransparent {
+					// If we are still in direct sunlight
+					if lightLevel == 15 {
+						chunk.SetLight(x, y, z, 15)
+						// Add to queue to propagate sideways
+						// Convert to Global coordinates for the queue to handle world boundaries if we expand
+						// But here we are working locally on the chunk mostly, but we need world context for neighbors.
+						// Let's use Global Coordinates in the queue to be safe and consistent.
+						globalX := chunk.X*config.ChunkWidth + x
+						globalZ := chunk.Z*config.ChunkWidth + z
+						queue = append(queue, LightNode{globalX, y, globalZ, 15})
+					} else {
+						// Not direct sunlight (under overhang), set to 0 initially
+						chunk.SetLight(x, y, z, 0)
+					}
+				} else {
+					// Solid block stops direct sunlight
+					lightLevel = 0
+					chunk.SetLight(x, y, z, 0)
+				}
+			}
 		}
 	}
-	return nightState
+
+	// 2. Seed BFS queue with light from neighboring chunk borders
+	// This ensures cross-chunk light propagation is preserved during incremental updates
+	neighborOffsets := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
+	for _, offset := range neighborOffsets {
+		neighborChunk := w.GetChunk(chunk.X+offset[0], chunk.Z+offset[1])
+		if neighborChunk == nil {
+			continue
+		}
+
+		// Determine which border of the neighbor to read from
+		var borderX, borderZ int
+		var iterX, iterZ bool
+
+		if offset[0] == -1 { // Neighbor to the left, read its right border (x=15)
+			borderX = config.ChunkWidth - 1
+			iterZ = true
+		} else if offset[0] == 1 { // Neighbor to the right, read its left border (x=0)
+			borderX = 0
+			iterZ = true
+		} else if offset[1] == -1 { // Neighbor behind, read its front border (z=15)
+			borderZ = config.ChunkWidth - 1
+			iterX = true
+		} else if offset[1] == 1 { // Neighbor in front, read its back border (z=0)
+			borderZ = 0
+			iterX = true
+		}
+
+		// Iterate along the border and seed queue with light sources
+		for y := range config.ChunkHeight {
+			if iterX {
+				for x := range config.ChunkWidth {
+					lightLevel := neighborChunk.GetLight(x, y, borderZ)
+					if lightLevel > 0 {
+						globalX := neighborChunk.X*config.ChunkWidth + x
+						globalZ := neighborChunk.Z*config.ChunkWidth + borderZ
+						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
+					}
+				}
+			} else if iterZ {
+				for z := range config.ChunkWidth {
+					lightLevel := neighborChunk.GetLight(borderX, y, z)
+					if lightLevel > 0 {
+						globalX := neighborChunk.X*config.ChunkWidth + borderX
+						globalZ := neighborChunk.Z*config.ChunkWidth + z
+						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
+					}
+				}
+			}
+		}
+	}
+
+	head := 0
+	for head < len(queue) {
+		node := queue[head]
+		head++
+
+		// If light level is 1 or 0, it cannot propagate further (0 would become -1)
+		if node.Level <= 1 {
+			continue
+		}
+
+		for _, dir := range directions {
+			nx, ny, nz := node.X+dir[0], node.Y+dir[1], node.Z+dir[2]
+
+			// Check Bounds (Y axis only, X/Z are infinite/world-based)
+			if ny < 0 || ny >= config.ChunkHeight {
+				continue
+			}
+
+			// Get Neighbor Block
+			// Use World.GetBlock to handle chunk boundaries seamlessly
+			neighborBlock := w.GetBlock(nx, ny, nz)
+
+			// If neighbor is solid, it blocks light.
+			isTransparent := neighborBlock == nil || neighborBlock.ID == "minae/air" || neighborBlock.Name == "Air"
+			if !isTransparent {
+				continue
+			}
+
+			// Get current light level of neighbor
+			currentLevel := w.GetLight(nx, ny, nz)
+
+			// Propagate if new level is brighter
+			// Decrease by 1
+			newLevel := node.Level - 1
+
+			// Special Case: Downwards propagation for skylight?
+			// In Minecraft, skylight propagates at full strength downwards through air.
+			// But we handled the "Direct Sunlight" in Step 1.
+			// Here we are propagating *dispersed* light (e.g. into caves).
+			// Wait, if we have a hole in the ceiling, Step 1 fills the column with 15.
+			// Then BFS propagates from that column into the cave.
+			// So standard -1 decay is correct for "dispersed" light.
+
+			if newLevel > currentLevel {
+				w.SetLight(nx, ny, nz, newLevel)
+				queue = append(queue, LightNode{nx, ny, nz, newLevel})
+			}
+		}
+	}
 }

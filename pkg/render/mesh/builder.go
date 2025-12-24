@@ -1,4 +1,4 @@
-package world
+package mesh
 
 import (
 	"math"
@@ -9,14 +9,6 @@ import (
 	"github.com/nahharris/minae/pkg/config"
 	"github.com/nahharris/minae/pkg/render/atlas"
 )
-
-// ChunkMeshData holds the raw data for a chunk mesh.
-type ChunkMeshData struct {
-	Vertices  []float32
-	Texcoords []float32
-	Normals   []float32
-	Colors    []uint8
-}
 
 type meshBuilder struct {
 	vertices  []float32
@@ -58,9 +50,12 @@ var meshBuilderPool = sync.Pool{
 	},
 }
 
-// UVLookup provides atlas UV coordinates for a texture key.
-type UVLookup interface {
-	UV(key string) (atlas.UV, bool)
+// chunkMeshHint provides a hint for buffer allocation
+type chunkMeshHint struct {
+	vertices  int
+	texcoords int
+	normals   int
+	colors    int
 }
 
 // Pre-computed face normals to avoid allocations.
@@ -73,30 +68,15 @@ var (
 	normalBack   = rl.Vector3{X: 0, Y: 0, Z: -1}
 )
 
-// CalculateChunkMesh generates the mesh data for the given chunk.
-// It performs face culling to remove invisible faces.
-// world: used to check neighbors across chunk boundaries.
-func CalculateChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *ChunkMeshData {
-	builder := buildChunkMesh(chunk, world, uvLookup)
-	if builder == nil {
-		return nil
-	}
-
-	data := &ChunkMeshData{
-		Vertices:  append([]float32(nil), builder.vertices...),
-		Texcoords: append([]float32(nil), builder.texcoords...),
-		Normals:   append([]float32(nil), builder.normals...),
-		Colors:    append([]uint8(nil), builder.colors...),
-	}
-
-	builder.release()
-	return data
-}
-
-func buildChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *meshBuilder {
+func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *meshBuilder {
+	// Note: We can't access chunk.meshHint efficiently via interface without exposing it.
+	// For now, let's just use defaults or a reasonable initial size.
+	// Or we could add MeshHint() to ChunkReader interface, but that leaks implementation detail.
+	// Let's assume zero hint for now and let append handle it.
+	
 	builder := meshBuilderPool.Get().(*meshBuilder)
 	builder.reset()
-	builder.ensureCapacity(chunk.meshHint)
+	// builder.ensureCapacity(chunk.meshHint) // Skipped for now
 
 	addQuad := func(x, y, z int, q blocks.Quad, alpha uint8, uv atlas.UV) {
 		fx, fy, fz := float32(x), float32(y), float32(z)
@@ -145,7 +125,7 @@ func buildChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *meshBuilder 
 					model = blocks.CompileModel(block.ID, block.ModelSpec)
 				}
 
-				gx, gy, gz := chunk.X*config.ChunkWidth+x, y, chunk.Z*config.ChunkWidth+z
+				gx, gy, gz := chunk.ChunkX()*config.ChunkWidth+x, y, chunk.ChunkZ()*config.ChunkWidth+z
 
 				quads = model.AppendQuads(quads[:0], meta)
 				for _, q := range quads {
@@ -182,46 +162,11 @@ func buildChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *meshBuilder 
 	}
 
 	if len(builder.vertices) == 0 {
-		chunk.meshHint = chunkMeshHint{}
 		builder.release()
 		return nil
 	}
 
-	chunk.meshHint = chunkMeshHint{
-		vertices:  len(builder.vertices),
-		texcoords: len(builder.texcoords),
-		normals:   len(builder.normals),
-		colors:    len(builder.colors),
-	}
-
 	return builder
-}
-
-// GenerateChunkMesh generates and uploads a Raylib mesh.
-func GenerateChunkMesh(chunk *Chunk, world *World, uvLookup UVLookup) *rl.Mesh {
-	builder := buildChunkMesh(chunk, world, uvLookup)
-	if builder == nil {
-		return nil
-	}
-
-	mesh := rl.Mesh{}
-	mesh.VertexCount = int32(len(builder.vertices) / 3)
-	mesh.TriangleCount = mesh.VertexCount / 3
-	mesh.Vertices = &builder.vertices[0]
-	mesh.Normals = &builder.normals[0]
-	mesh.Texcoords = &builder.texcoords[0]
-	mesh.Colors = &builder.colors[0]
-
-	rl.UploadMesh(&mesh, false)
-
-	// Allow GC/pool reuse without keeping references from the mesh struct.
-	mesh.Vertices = nil
-	mesh.Normals = nil
-	mesh.Texcoords = nil
-	mesh.Colors = nil
-
-	builder.release()
-	return &mesh
 }
 
 func normalForFace(face blocks.Face) rl.Vector3 {
@@ -338,3 +283,4 @@ func uvForVertex(face blocks.Face, v blocks.Vec3, r atlas.UV) (u, vt float32) {
 	vt = r.V0 + (r.V1-r.V0)*localV
 	return u, vt
 }
+
