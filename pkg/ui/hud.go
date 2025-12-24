@@ -12,7 +12,7 @@ func (u *UIManager) initHUD() {
 	hotbar.Alignment = minui.AlignEnd
 	hotbar.Padding = 10
 	hotbar.Spacing = 5
-	
+
 	u.hudRoot = hotbar
 }
 
@@ -32,13 +32,13 @@ func (u *UIManager) DrawHUD(screenWidth, screenHeight int) {
 	hotbar := u.hudRoot.(*minui.Panel)
 	hotbar.Children = nil // Clear
 
-	for i, block := range u.Player.Inventory {
+	for i, block := range u.Player.State.Inventory {
 		// Create a container for the slot to handle background highlighting
 		slot := minui.NewPanel()
 		slot.Direction = minui.DirectionHorizontal
 		slot.Padding = 5
 		slot.Spacing = 10
-		
+
 		// Highlight selected
 		if i == u.Player.SelectedBlockIndex {
 			slot.BackgroundColor = rl.Fade(rl.Yellow, 0.3)
@@ -70,19 +70,18 @@ func (u *UIManager) DrawHUD(screenWidth, screenHeight int) {
 		Width:  float32(screenWidth),
 		Height: float32(screenHeight),
 	}
-	
+
 	size := hotbar.ComputeSize(available)
-	
+
 	x := float32(screenWidth) - size.Width - 10
 	y := (float32(screenHeight) - size.Height) / 2
-	
+
 	hotbar.SetBounds(minui.Rect{
 		X:      x,
 		Y:      y,
 		Width:  size.Width,
 		Height: size.Height,
 	})
-	
+
 	hotbar.Draw()
 }
-

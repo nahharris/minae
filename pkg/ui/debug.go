@@ -128,8 +128,8 @@ func (u *UIManager) updateDebugStrings() {
 	}
 
 	// Time
-	if u.Lighting != nil {
-		timeStr := formatTime(u.Lighting.Time, u.Lighting.CycleDuration)
+	if u.Time != nil {
+		timeStr := formatTime(u.Time.Time, u.Time.CycleDuration)
 		if timeStr != u.cachedTime {
 			u.cachedTime = timeStr
 			u.debugTime = "Time: " + timeStr

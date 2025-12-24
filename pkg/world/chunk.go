@@ -9,6 +9,7 @@ import (
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
 	Blocks   [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]blocks.NumID
+	Meta     [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	LightMap [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	X, Z     int // Chunk coordinates in the world grid (not world position)
 	meshHint chunkMeshHint
@@ -20,14 +21,21 @@ func NewChunk(x, z int) *Chunk {
 		X: x,
 		Z: z,
 	}
-	// Initialize with Air (assuming air is nil or a specific block)
-	// If we want explicit air blocks, we should set them here.
-	// For now, let's assume nil means "Air" or default, but better to be explicit if possible.
-	// However, since we are using pointers, nil is a valid state for "nothing".
-	// But "Air" is usually a block type. Let's try to use the "minae/air" block if available,
-	// or handle nil as air.
-	// For safety, let's fill with nil and handle nil as Air in GetBlock.
 	return c
+}
+
+// ChunkX returns the X coordinate of the chunk.
+func (c *Chunk) ChunkX() int {
+	return c.X
+}
+
+// ChunkZ returns the Z coordinate of the chunk.
+func (c *Chunk) ChunkZ() int {
+	return c.Z
+}
+
+func (c *Chunk) InBounds(x, y, z int) bool {
+	return x >= 0 && x < config.ChunkWidth && y >= 0 && y < config.ChunkHeight && z >= 0 && z < config.ChunkWidth
 }
 
 // GetBlock returns the block type at the specified local coordinates.
@@ -35,21 +43,82 @@ func NewChunk(x, z int) *Chunk {
 // y: 0 to 255
 // Returns nil (Air) if coordinates are out of bounds or block is nil.
 func (c *Chunk) GetBlock(x, y, z int) *blocks.Block {
-	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
+	if !c.InBounds(x, y, z) {
 		return nil
 	}
 	index := c.getBlockIndex(x, y, z)
 	return blocks.FromNumericID(c.Blocks[index])
 }
 
+// GetBlockMeta returns the block instance metadata at the specified local coordinates.
+// Returns 0 if coordinates are out of bounds or the block is air.
+func (c *Chunk) GetBlockMeta(x, y, z int) uint8 {
+	if !c.InBounds(x, y, z) {
+		return 0
+	}
+	index := c.getBlockIndex(x, y, z)
+	if blocks.FromNumericID(c.Blocks[index]) == nil {
+		return 0
+	}
+	return c.Meta[index]
+}
+
+// GetBlockState returns the block type and per-instance metadata at the specified local coordinates.
+// Returns (nil, 0) (Air) if coordinates are out of bounds or the block is air.
+func (c *Chunk) GetBlockState(x, y, z int) (*blocks.Block, uint8) {
+	if !c.InBounds(x, y, z) {
+		return nil, 0
+	}
+	index := c.getBlockIndex(x, y, z)
+	b := blocks.FromNumericID(c.Blocks[index])
+	if b == nil {
+		return nil, 0
+	}
+	return b, c.Meta[index]
+}
+
 // SetBlock sets the block type at the specified local coordinates.
 // Returns true if successful, false if coordinates are out of bounds.
 func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
-	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
+	if !c.InBounds(x, y, z) {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
 	c.Blocks[index] = blocks.NumericIDOf(block)
+	// Reset meta for convenience. Per-instance meta should be set via SetBlockState.
+	c.Meta[index] = 0
+	return true
+}
+
+// SetBlockMeta sets per-instance metadata for the specified local coordinates.
+// Returns false if out of bounds or the block is air.
+func (c *Chunk) SetBlockMeta(x, y, z int, meta uint8) bool {
+	if !c.InBounds(x, y, z) {
+		return false
+	}
+	index := c.getBlockIndex(x, y, z)
+	if blocks.FromNumericID(c.Blocks[index]) == nil {
+		c.Meta[index] = 0
+		return false
+	}
+	c.Meta[index] = meta
+	return true
+}
+
+// SetBlockState sets the block type and per-instance metadata at the specified local coordinates.
+// If block is air, meta is cleared to 0.
+func (c *Chunk) SetBlockState(x, y, z int, block *blocks.Block, meta uint8) bool {
+	if !c.InBounds(x, y, z) {
+		return false
+	}
+	index := c.getBlockIndex(x, y, z)
+	id := blocks.NumericIDOf(block)
+	c.Blocks[index] = id
+	if id == blocks.InvalidNumericID {
+		c.Meta[index] = 0
+		return true
+	}
+	c.Meta[index] = meta
 	return true
 }
 
@@ -58,7 +127,7 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 // y: 0 to 255
 // Returns 0 if coordinates are out of bounds.
 func (c *Chunk) GetLight(x, y, z int) uint8 {
-	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
+	if !c.InBounds(x, y, z) {
 		return 0
 	}
 	index := c.getBlockIndex(x, y, z)
@@ -68,7 +137,7 @@ func (c *Chunk) GetLight(x, y, z int) uint8 {
 // SetLight sets the light level at the specified local coordinates.
 // Returns true if successful, false if coordinates are out of bounds.
 func (c *Chunk) SetLight(x, y, z int, level uint8) bool {
-	if x < 0 || x >= config.ChunkWidth || y < 0 || y >= config.ChunkHeight || z < 0 || z >= config.ChunkWidth {
+	if !c.InBounds(x, y, z) {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)

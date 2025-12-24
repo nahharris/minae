@@ -7,7 +7,7 @@
 # Output
 /bin/
 /dist/
-minae
+/minae
 
 # IDE
 .vscode/

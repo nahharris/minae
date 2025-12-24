@@ -6,8 +6,11 @@ import (
 )
 
 // World manages the collection of chunks and global world logic.
+// It also holds the saveable state like player data and time.
 type World struct {
-	Chunks map[ChunkCoord]*Chunk
+	Chunks      map[ChunkCoord]*Chunk
+	PlayerState *PlayerState
+	TimeOfDay   *TimeOfDay
 }
 
 // ChunkCoord represents the grid coordinates of a chunk.
@@ -15,10 +18,12 @@ type ChunkCoord struct {
 	X, Z int
 }
 
-// NewWorld creates a new empty World.
+// NewWorld creates a new empty World with initialized state.
 func NewWorld() *World {
 	return &World{
-		Chunks: make(map[ChunkCoord]*Chunk),
+		Chunks:      make(map[ChunkCoord]*Chunk),
+		PlayerState: NewPlayerState(),
+		TimeOfDay:   NewTimeOfDay(),
 	}
 }
 
@@ -36,16 +41,11 @@ func (w *World) GenerateFixedGrid() {
 }
 
 // fillChunkDebug fills the chunk with random noise for testing.
+// TODO: Move this to generator.go when refactoring is complete
 func (w *World) fillChunkDebug(c *Chunk) {
-	// If blocks are not loaded yet (during tests?), fallback or panic?
-	// For safety, let's just skip if nil, but this will result in air.
-	// But since we bootstrap before this call in main, it should be fine.
-
 	for x := range config.ChunkWidth {
 		for z := range config.ChunkWidth {
-			// Simple terrain height
-			height := 32 // flat for now, or maybe random?
-			// Let's just fill up to 32 for solid ground
+			height := 32
 			for y := 0; y < height; y++ {
 				if y < height-3 {
 					c.SetBlock(x, y, z, blocks.Stone)
@@ -64,15 +64,24 @@ func (w *World) GetBlock(x, y, z int) *blocks.Block {
 	chunkX, localX := worldToLocal(x)
 	chunkZ, localZ := worldToLocal(z)
 
-	// Fix negative modulo issues if strictly using modulo
-	// But the subtraction above handles it if chunkX is calculated with Floor correctly.
-	// Example: x = -1. chunkX = -1. localX = -1 - (-16) = 15. Correct.
-
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
 		return nil
 	}
 	return chunk.GetBlock(localX, y, localZ)
+}
+
+// GetBlockState returns the block type and per-instance metadata at the given global coordinates.
+// Returns (nil, 0) if the chunk is missing or the position is air/out of bounds.
+func (w *World) GetBlockState(x, y, z int) (*blocks.Block, uint8) {
+	chunkX, localX := worldToLocal(x)
+	chunkZ, localZ := worldToLocal(z)
+
+	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
+	if !exists {
+		return nil, 0
+	}
+	return chunk.GetBlockState(localX, y, localZ)
 }
 
 // GetLight returns the light level at the global world coordinates.
@@ -107,6 +116,12 @@ func (w *World) GetChunk(x, z int) *Chunk {
 // SetBlock sets the block type at the global world coordinates.
 // Returns a list of chunk coordinates that need to be re-meshed.
 func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
+	return w.SetBlockState(x, y, z, b, 0)
+}
+
+// SetBlockState sets the block type and per-instance metadata at the given global coordinates.
+// Returns a list of chunk coordinates that need to be re-meshed.
+func (w *World) SetBlockState(x, y, z int, b *blocks.Block, meta uint8) []ChunkCoord {
 	if y < 0 || y >= config.ChunkHeight {
 		return nil
 	}
@@ -120,7 +135,7 @@ func (w *World) SetBlock(x, y, z int, b *blocks.Block) []ChunkCoord {
 		return nil
 	}
 
-	if !chunk.SetBlock(localX, y, localZ, b) {
+	if !chunk.SetBlockState(localX, y, localZ, b, meta) {
 		return nil
 	}
 

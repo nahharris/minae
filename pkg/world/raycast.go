@@ -106,4 +106,3 @@ func (w *World) Raycast(start, dir rl.Vector3, maxDist float32) (bool, [3]int, [
 
 	return false, [3]int{}, [3]int{}, nil
 }
-

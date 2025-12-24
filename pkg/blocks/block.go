@@ -17,5 +17,20 @@ type Block struct {
 	Name  string `yaml:"name"`  // Human readable name
 	Color uint32 `yaml:"color"` // Hex color 0xRRGGBBAA
 
+	// ModelSpec is the YAML-friendly description of how this block should be rendered.
+	ModelSpec ModelSpec `yaml:"model"`
+
+	// Model is the compiled runtime block model.
+	Model BlockModel `yaml:"-"`
+
 	numericID NumID
+}
+
+func (b *Block) ensureModel() {
+	if b == nil || b.ID == airBlockID {
+		return
+	}
+	if b.Model == nil {
+		b.Model = CompileModel(b.ID, b.ModelSpec)
+	}
 }

@@ -6,7 +6,6 @@ import (
 	"github.com/nahharris/minae/minui"
 	"github.com/nahharris/minae/pkg/player"
 	"github.com/nahharris/minae/pkg/world"
-	"github.com/nahharris/minae/pkg/world/lighting"
 )
 
 // UIManager handles drawing of overlays and menus.
@@ -15,9 +14,9 @@ type UIManager struct {
 	ShowDebug bool
 
 	// Dependencies
-	Player   *player.Player
-	World    *world.World
-	Lighting *lighting.Manager
+	Player *player.Player
+	World  *world.World
+	Time   *world.TimeOfDay
 
 	// UI Components
 	hudRoot       minui.Component
@@ -52,13 +51,13 @@ type UIManager struct {
 }
 
 // NewUIManager creates a new UIManager.
-func NewUIManager(p *player.Player, w *world.World, l *lighting.Manager) *UIManager {
+func NewUIManager(p *player.Player, w *world.World, t *world.TimeOfDay) *UIManager {
 	u := &UIManager{
 		ShowAllUI: true,
 		ShowDebug: false,
 		Player:    p,
 		World:     w,
-		Lighting:  l,
+		Time:      t,
 	}
 	u.initHUD()
 	u.initDebug()

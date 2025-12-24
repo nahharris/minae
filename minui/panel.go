@@ -12,10 +12,10 @@ type Panel struct {
 	Padding         float32
 	Spacing         float32
 	BackgroundColor rl.Color
-	
+
 	// If FixedSize is set > 0, it forces that size. Otherwise fits content.
 	FixedSize Size
-	
+
 	bounds Rect
 }
 
@@ -44,12 +44,12 @@ func (p *Panel) ComputeSize(available Size) Size {
 	// Use layout logic to determine required size
 	// passing dummy pos, as we only care about total size here
 	_, size := ApplyStackLayout(
-		Point{0, 0}, 
-		available, 
-		p.Direction, 
-		p.Alignment, 
-		p.Padding, 
-		p.Spacing, 
+		Point{0, 0},
+		available,
+		p.Direction,
+		p.Alignment,
+		p.Padding,
+		p.Spacing,
 		childSizes,
 	)
 
@@ -65,7 +65,7 @@ func (p *Panel) ComputeSize(available Size) Size {
 
 func (p *Panel) SetBounds(rect Rect) {
 	p.bounds = rect
-	
+
 	// Now we need to layout children within this rect
 	childSizes := make([]Size, len(p.Children))
 	for i, c := range p.Children {
@@ -106,4 +106,3 @@ func (p *Panel) Draw() {
 		c.Draw()
 	}
 }
-
