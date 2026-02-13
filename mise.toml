@@ -6,13 +6,13 @@ golangci-lint = "latest"
 MINAE_DATA_FOLDER = "data"
 
 [tasks.build]
-run = "go build -o bin/main main.go"
-run_windows = "go build -o bin/main.exe main.go"
+run = "go build -o bin/minae cmd/minae/main.go"
+run_windows = "go build -o bin/minae.exe cmd/minae/main.go"
 description = "Compile the game, outputting the results to bin/"
 
 [tasks.dev]
-run = "./bin/main"
-run_windows = ".\\bin\\main.exe"
+run = "./bin/minae"
+run_windows = ".\\bin\\minae.exe"
 depends = ["build"]
 description = "Run the compiled game. Build it first if necessary."
 
@@ -43,8 +43,8 @@ run_windows = [
 description = "Download and install the Raylib DLL for Windows. Only needed once at setup."
 
 [tasks."clean:build"]
-run = "rm -f bin/main"
-run_windows = "rm -f bin/main.exe"
+run = "rm -f bin/minae"
+run_windows = "rm -f bin/minae.exe"
 description = "Remove the compiled binary from the bin/ directory."
 
 [tasks."clean:setup"]

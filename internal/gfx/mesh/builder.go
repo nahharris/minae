@@ -1,0 +1,285 @@
+package mesh
+
+import (
+	"math"
+	"sync"
+
+	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/internal/blocks/model"
+	"github.com/nahharris/minae/internal/gfx/atlas"
+	"github.com/nahharris/minae/internal/platform/config"
+)
+
+type meshBuilder struct {
+	vertices  []float32
+	texcoords []float32
+	normals   []float32
+	colors    []uint8
+}
+
+func (b *meshBuilder) reset() {
+	b.vertices = b.vertices[:0]
+	b.texcoords = b.texcoords[:0]
+	b.normals = b.normals[:0]
+	b.colors = b.colors[:0]
+}
+
+func (b *meshBuilder) ensureCapacity(h chunkMeshHint) {
+	if h.vertices > 0 && cap(b.vertices) < h.vertices {
+		b.vertices = make([]float32, 0, h.vertices)
+	}
+	if h.texcoords > 0 && cap(b.texcoords) < h.texcoords {
+		b.texcoords = make([]float32, 0, h.texcoords)
+	}
+	if h.normals > 0 && cap(b.normals) < h.normals {
+		b.normals = make([]float32, 0, h.normals)
+	}
+	if h.colors > 0 && cap(b.colors) < h.colors {
+		b.colors = make([]uint8, 0, h.colors)
+	}
+}
+
+func (b *meshBuilder) release() {
+	b.reset()
+	meshBuilderPool.Put(b)
+}
+
+var meshBuilderPool = sync.Pool{
+	New: func() any {
+		return &meshBuilder{}
+	},
+}
+
+// chunkMeshHint provides a hint for buffer allocation
+type chunkMeshHint struct {
+	vertices  int
+	texcoords int
+	normals   int
+	colors    int
+}
+
+// Pre-computed face normals to avoid allocations.
+var (
+	normalTop    = rl.Vector3{X: 0, Y: 1, Z: 0}
+	normalBottom = rl.Vector3{X: 0, Y: -1, Z: 0}
+	normalLeft   = rl.Vector3{X: -1, Y: 0, Z: 0}
+	normalRight  = rl.Vector3{X: 1, Y: 0, Z: 0}
+	normalFront  = rl.Vector3{X: 0, Y: 0, Z: 1}
+	normalBack   = rl.Vector3{X: 0, Y: 0, Z: -1}
+)
+
+func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *meshBuilder {
+	// Note: We can't access chunk.meshHint efficiently via interface without exposing it.
+	// For now, let's just use defaults or a reasonable initial size.
+	// Or we could add MeshHint() to ChunkReader interface, but that leaks implementation detail.
+	// Let's assume zero hint for now and let append handle it.
+
+	builder := meshBuilderPool.Get().(*meshBuilder)
+	builder.reset()
+	// builder.ensureCapacity(chunk.meshHint) // Skipped for now
+
+	addQuad := func(x, y, z int, q model.Quad, alpha uint8, uv atlas.UV) {
+		fx, fy, fz := float32(x), float32(y), float32(z)
+
+		n := normalForFace(q.Face)
+
+		p1, p2, p3, p4 := q.V1, q.V2, q.V3, q.V4
+		builder.vertices = append(builder.vertices,
+			fx+p1.X, fy+p1.Y, fz+p1.Z,
+			fx+p2.X, fy+p2.Y, fz+p2.Z,
+			fx+p3.X, fy+p3.Y, fz+p3.Z,
+			fx+p1.X, fy+p1.Y, fz+p1.Z,
+			fx+p3.X, fy+p3.Y, fz+p3.Z,
+			fx+p4.X, fy+p4.Y, fz+p4.Z,
+		)
+
+		for range 6 {
+			builder.normals = append(builder.normals, n.X, n.Y, n.Z)
+			// RGB is white so textures show true colors; alpha encodes skylight (0..255).
+			builder.colors = append(builder.colors, 255, 255, 255, alpha)
+		}
+
+		u1, v1 := uvForVertex(q.Face, p1, uv)
+		u2, v2 := uvForVertex(q.Face, p2, uv)
+		u3, v3 := uvForVertex(q.Face, p3, uv)
+		u4, v4 := uvForVertex(q.Face, p4, uv)
+
+		builder.texcoords = append(builder.texcoords,
+			u1, v1, u2, v2, u3, v3,
+			u1, v1, u3, v3, u4, v4,
+		)
+	}
+
+	quads := make([]model.Quad, 0, 16)
+
+	for x := range config.ChunkWidth {
+		for y := range config.ChunkHeight {
+			for z := range config.ChunkWidth {
+				block, meta := chunk.GetBlockState(x, y, z)
+				if block == nil {
+					continue
+				}
+
+				blockModel := block.Model
+				if blockModel == nil {
+					blockModel = model.CompileModel(block.ID, block.ModelSpec)
+				}
+
+				gx, gy, gz := chunk.ChunkX()*config.ChunkWidth+x, y, chunk.ChunkZ()*config.ChunkWidth+z
+
+				quads = blockModel.AppendQuads(quads[:0], meta)
+				for _, q := range quads {
+					dx, dy, dz := offsetForFace(q.Face)
+					light := world.GetLight(gx+dx, gy+dy, gz+dz)
+					alpha := uint8((uint16(light) * 255) / 15)
+
+					if q.Cull {
+						neighbor, nmeta := world.GetBlockState(gx+dx, gy+dy, gz+dz)
+						if neighbor != nil {
+							neighborModel := neighbor.Model
+							if neighborModel == nil {
+								neighborModel = model.CompileModel(neighbor.ID, neighbor.ModelSpec)
+							}
+
+							region := quadRegion(q)
+							if neighborModel.Occludes(nmeta, q.Face.Opposite(), region) {
+								continue
+							}
+						}
+					}
+
+					uv := atlas.UV{U0: 0, V0: 0, U1: 1, V1: 1}
+					if uvLookup != nil && q.Texture != "" {
+						if r, ok := uvLookup.UV(q.Texture); ok {
+							uv = r
+						}
+					}
+
+					addQuad(x, y, z, q, alpha, uv)
+				}
+			}
+		}
+	}
+
+	if len(builder.vertices) == 0 {
+		builder.release()
+		return nil
+	}
+
+	return builder
+}
+
+func normalForFace(face model.Face) rl.Vector3 {
+	switch face {
+	case model.FaceRight:
+		return normalRight
+	case model.FaceLeft:
+		return normalLeft
+	case model.FaceTop:
+		return normalTop
+	case model.FaceBottom:
+		return normalBottom
+	case model.FaceFront:
+		return normalFront
+	default:
+		return normalBack
+	}
+}
+
+func offsetForFace(face model.Face) (dx, dy, dz int) {
+	switch face {
+	case model.FaceRight:
+		return 1, 0, 0
+	case model.FaceLeft:
+		return -1, 0, 0
+	case model.FaceTop:
+		return 0, 1, 0
+	case model.FaceBottom:
+		return 0, -1, 0
+	case model.FaceFront:
+		return 0, 0, 1
+	default:
+		return 0, 0, -1
+	}
+}
+
+func quadRegion(q model.Quad) model.Rect {
+	minU, minV := float32(math.Inf(1)), float32(math.Inf(1))
+	maxU, maxV := float32(math.Inf(-1)), float32(math.Inf(-1))
+
+	vs := [4]model.Vec3{q.V1, q.V2, q.V3, q.V4}
+	for _, v := range vs {
+		var u, w float32
+		switch q.Face {
+		case model.FaceRight, model.FaceLeft:
+			u, w = v.Z, v.Y
+		case model.FaceFront, model.FaceBack:
+			u, w = v.X, v.Y
+		default: // Top/Bottom
+			u, w = v.X, v.Z
+		}
+
+		if u < minU {
+			minU = u
+		}
+		if w < minV {
+			minV = w
+		}
+		if u > maxU {
+			maxU = u
+		}
+		if w > maxV {
+			maxV = w
+		}
+	}
+
+	if math.IsInf(float64(minU), 1) || math.IsInf(float64(minV), 1) {
+		return model.Rect{}
+	}
+
+	return model.Rect{MinU: minU, MinV: minV, MaxU: maxU, MaxV: maxV}
+}
+
+func uvForVertex(face model.Face, v model.Vec3, r atlas.UV) (u, vt float32) {
+	localU, localV := float32(0), float32(0)
+
+	// Convention:
+	// - Texture origin is top-left (V increases downward).
+	// - On vertical faces, V=0 maps to world-up (Y=1), V=1 maps to world-down (Y=0).
+	switch face {
+	case model.FaceFront: // +Z
+		localU = 1 - v.X
+		localV = 1 - v.Y
+	case model.FaceBack: // -Z
+		localU = v.X
+		localV = 1 - v.Y
+	case model.FaceRight: // +X
+		localU = v.Z
+		localV = 1 - v.Y
+	case model.FaceLeft: // -X
+		localU = 1 - v.Z
+		localV = 1 - v.Y
+	case model.FaceTop: // +Y
+		localU = v.X
+		localV = v.Z
+	default: // model.FaceBottom (-Y)
+		localU = v.X
+		localV = 1 - v.Z
+	}
+
+	// Clamp to avoid tiny floating errors from rotations.
+	if localU < 0 {
+		localU = 0
+	} else if localU > 1 {
+		localU = 1
+	}
+	if localV < 0 {
+		localV = 0
+	} else if localV > 1 {
+		localV = 1
+	}
+
+	u = r.U0 + (r.U1-r.U0)*localU
+	vt = r.V0 + (r.V1-r.V0)*localV
+	return u, vt
+}
