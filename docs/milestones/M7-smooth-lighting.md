@@ -147,3 +147,62 @@ Automated tests cover the vertex data, not the pixels.
       desynchronised flip would produce.
 - [ ] A glowstone-lit cave still looks correct: block light is averaged too, not
       dropped.
+
+## Follow-up fix: the triangulation flip was inverted
+
+Found by eye after M7 merged: with one block the corner shadow looked right, but
+adding a second made a corner "vanish" — a hard bright wedge cutting through
+where the shadow should have been darkest.
+
+**The flip condition was backwards.** A quad must split along the diagonal
+through its *darker* corners. Light is interpolated across each triangle
+independently, so splitting along the brighter diagonal can leave one triangle
+with every corner unoccluded. That triangle then renders at full brightness
+right up to the edge it shares with the shaded half. Splitting through the
+occluded corner instead puts it in both triangles, and the shadow radiates from
+it.
+
+The code flipped when the default diagonal was *darker* — precisely when it
+should have kept it, and vice versa.
+
+### Why the M7 criteria missed it
+
+Criterion 5 asked that the flip keep each vertex's position, UV and colour
+together. It never asked that the flip go the *right way*. Both properties
+matter and only one was specified, so an implementation could satisfy every
+stated criterion and still produce the artifact the feature exists to prevent.
+
+Writing "the flip happens" as a criterion is not the same as writing "the flip
+is correct".
+
+### The invariant now pinned
+
+`TestAO_NoFullyUnoccludedTriangleBesideAnOccludedCorner`: if any corner of a
+quad is occluded, no emitted triangle may consist entirely of unoccluded
+corners. That is a direct statement of the visual artifact, and it fails against
+the inverted rule.
+
+### Two tests had to stop depending on emission order
+
+`TestSmoothLighting_TriangulationFlipKeepsCornersTogether` and
+`TestSmoothLighting_InsideCornerDarkens` both indexed vertices by their position
+in the emitted stream, which encodes the flip direction. Changing the rule broke
+them for reasons unrelated to what they test, and the tempting fix — editing the
+expected order — is exactly how a test gets bent to fit a bug.
+
+Both now key off vertex *positions*: the first checks that each emitted vertex's
+position, UV and colour belong to the same corner under either split, and the
+second checks that the geometrically-identified inside corner is the darkest.
+Which diagonal the quad splits along is now asserted in exactly one place.
+
+## Known cosmetic limitation: banding
+
+Light is interpolated between four per-corner values, each quantised to one of
+16 levels, with AO quantised to four. On large untextured surfaces in a dark
+palette this reads as visible steps rather than a smooth ramp. It is inherent to
+per-vertex lighting at one-block resolution and is not a defect in the
+implementation; textured blocks hide most of it.
+
+Options, none scheduled: dither in the fragment shader (cheap, hides 8-bit
+quantisation), or sample light at sub-block resolution (expensive, and a much
+larger change).
