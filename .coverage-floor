@@ -9,4 +9,5 @@
 # 2026-09-05  M4  31.0  (measured 31.6)
 # 2026-09-05  M5  35.0  (measured 35.5; internal/world 20.1% -> 50.2%)
 # 2026-09-05  M6  38.0  (measured 38.9; block light. world/lighting at 95.8%)
-38.0
+# 2026-09-05  M7  41.0  (measured 41.2; smooth lighting + AO. gfx/mesh at 89.2%)
+41.0

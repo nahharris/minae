@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M6](milestones/M6-block-light.md).
+Last reviewed: 2026-09-05, at the close of [M7](milestones/M7-smooth-lighting.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -88,7 +88,7 @@ The roadmap's known-defect list is empty as of M5.
 | Persistence | Data model supports it | No serialisation to disk |
 | Textures | Three PNGs, colour fallback otherwise | Full block texture set |
 | Blocks | 7 types | Transparency, liquids, stairs, fences, doors |
-| Lighting | Skylight and block light (glowstone), rendered | Ambient occlusion, smooth lighting; a torch model |
+| Lighting | Skylight and block light, smooth-shaded with ambient occlusion | A torch model; a directional sun tint (optional) |
 
 ## Verification
 
@@ -99,13 +99,13 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package, at the close of M6 (total 38.9%, floor 38.0):
+Coverage by package, at the close of M7 (total 41.2%, floor 41.0):
 
 | Package | Coverage |
 |---|---|
 | `core` | 100% |
 | `world/lighting` | 95.8% |
-| `gfx/mesh` | 86.0% |
+| `gfx/mesh` | 89.2% |
 | `testutil` | 85.4% |
 | `platform/config` | 78.6% |
 | `blocks` | 68.9% |

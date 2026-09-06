@@ -31,7 +31,7 @@ func TestVertexColor_BlockLightMapping(t *testing.T) {
 			w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 			neighbor := world.NewChunk(1, 0)
-			neighbor.SetBlockLight(0, 8, 8, level)
+			setRightFaceLightPatch(neighbor.SetBlockLight, 0, 8, 8, level)
 			w.Chunks[world.ChunkCoord{X: 1, Z: 0}] = neighbor
 
 			c.SetBlock(15, 8, 8, stone)
@@ -94,8 +94,8 @@ func TestVertexColor_SkyAndBlockLight_Independent(t *testing.T) {
 	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 	neighbor := world.NewChunk(1, 0)
-	neighbor.SetSkyLight(0, 8, 8, 3)
-	neighbor.SetBlockLight(0, 8, 8, 12)
+	setRightFaceLightPatch(neighbor.SetSkyLight, 0, 8, 8, 3)
+	setRightFaceLightPatch(neighbor.SetBlockLight, 0, 8, 8, 12)
 	w.Chunks[world.ChunkCoord{X: 1, Z: 0}] = neighbor
 
 	c.SetBlock(15, 8, 8, stone)
@@ -125,69 +125,114 @@ func TestVertexColor_SkyAndBlockLight_Independent(t *testing.T) {
 	}
 }
 
-// TestVertexColor_AllChannelsAcrossEveryVertex places a block away from any
-// chunk edge, gives every one of its six neighboring cells a distinct,
-// direction-identifiable skylight/block-light pair, and then checks every
-// single vertex of every face (not just the first vertex of each) so that a
-// bug affecting only later vertices in a face's 6-vertex run cannot slip by.
+// TestVertexColor_AllChannelsAcrossEveryVertex checks, for each of a block's
+// six faces in turn, that every single vertex of that face (not just the
+// first) carries the correct skylight/block-light pair, with AO still at the
+// unoccluded constant and alpha still fully opaque.
+//
+// Before smooth lighting, one neighbouring cell was the whole story for a
+// face, so a single test block with six distinct, direction-identifiable
+// neighbour values could check all six faces at once. Now every corner
+// averages over a 3x3 patch of cells (see setRightFaceLightPatch), and a
+// real block's face patches overlap at the diagonals -- the top face's patch
+// and the right face's patch share the cell above and to the right of the
+// block, for instance -- so six distinct simultaneous values are no longer
+// achievable. Each face is therefore its own case with its own fresh world,
+// patch-lit uniformly so the face still reads as one flat value; the
+// per-vertex, not-just-first-vertex check is preserved as-is.
 func TestVertexColor_AllChannelsAcrossEveryVertex(t *testing.T) {
 	blocks.Reset()
 	stone := blocks.Stone
 	blocks.Register(stone)
 
-	w := world.NewWorld()
-	c := world.NewChunk(0, 0)
-	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
-
-	c.SetBlock(8, 8, 8, stone)
-
-	type expect struct{ sky, block uint8 }
-	// faceRight..faceBack order matches AppendQuads' fixed emission order.
-	expected := map[int]expect{
-		faceRight:  {sky: 15, block: 0},
-		faceLeft:   {sky: 0, block: 15},
-		faceTop:    {sky: 8, block: 3},
-		faceBottom: {sky: 3, block: 8},
-		faceFront:  {sky: 1, block: 14},
-		faceBack:   {sky: 14, block: 1},
+	cases := []struct {
+		name       string
+		face       int
+		sky, block uint8
+		light      func(c *world.Chunk, sky, block uint8)
+	}{
+		{"right", faceRight, 15, 0, func(c *world.Chunk, sky, block uint8) {
+			for dy := -1; dy <= 1; dy++ {
+				for dz := -1; dz <= 1; dz++ {
+					c.SetSkyLight(9, 8+dy, 8+dz, sky)
+					c.SetBlockLight(9, 8+dy, 8+dz, block)
+				}
+			}
+		}},
+		{"left", faceLeft, 0, 15, func(c *world.Chunk, sky, block uint8) {
+			for dy := -1; dy <= 1; dy++ {
+				for dz := -1; dz <= 1; dz++ {
+					c.SetSkyLight(7, 8+dy, 8+dz, sky)
+					c.SetBlockLight(7, 8+dy, 8+dz, block)
+				}
+			}
+		}},
+		{"top", faceTop, 8, 3, func(c *world.Chunk, sky, block uint8) {
+			for dx := -1; dx <= 1; dx++ {
+				for dz := -1; dz <= 1; dz++ {
+					c.SetSkyLight(8+dx, 9, 8+dz, sky)
+					c.SetBlockLight(8+dx, 9, 8+dz, block)
+				}
+			}
+		}},
+		{"bottom", faceBottom, 3, 8, func(c *world.Chunk, sky, block uint8) {
+			for dx := -1; dx <= 1; dx++ {
+				for dz := -1; dz <= 1; dz++ {
+					c.SetSkyLight(8+dx, 7, 8+dz, sky)
+					c.SetBlockLight(8+dx, 7, 8+dz, block)
+				}
+			}
+		}},
+		{"front", faceFront, 1, 14, func(c *world.Chunk, sky, block uint8) {
+			for dx := -1; dx <= 1; dx++ {
+				for dy := -1; dy <= 1; dy++ {
+					c.SetSkyLight(8+dx, 8+dy, 9, sky)
+					c.SetBlockLight(8+dx, 8+dy, 9, block)
+				}
+			}
+		}},
+		{"back", faceBack, 14, 1, func(c *world.Chunk, sky, block uint8) {
+			for dx := -1; dx <= 1; dx++ {
+				for dy := -1; dy <= 1; dy++ {
+					c.SetSkyLight(8+dx, 8+dy, 7, sky)
+					c.SetBlockLight(8+dx, 8+dy, 7, block)
+				}
+			}
+		}},
 	}
 
-	c.SetSkyLight(9, 8, 8, expected[faceRight].sky)
-	c.SetBlockLight(9, 8, 8, expected[faceRight].block)
-	c.SetSkyLight(7, 8, 8, expected[faceLeft].sky)
-	c.SetBlockLight(7, 8, 8, expected[faceLeft].block)
-	c.SetSkyLight(8, 9, 8, expected[faceTop].sky)
-	c.SetBlockLight(8, 9, 8, expected[faceTop].block)
-	c.SetSkyLight(8, 7, 8, expected[faceBottom].sky)
-	c.SetBlockLight(8, 7, 8, expected[faceBottom].block)
-	c.SetSkyLight(8, 8, 9, expected[faceFront].sky)
-	c.SetBlockLight(8, 8, 9, expected[faceFront].block)
-	c.SetSkyLight(8, 8, 7, expected[faceBack].sky)
-	c.SetBlockLight(8, 8, 7, expected[faceBack].block)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := world.NewWorld()
+			c := world.NewChunk(0, 0)
+			w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
-	data := mesh.GenerateChunkMeshData(c, w, nil)
-	if data == nil {
-		t.Fatal("expected mesh data, got nil")
-	}
+			c.SetBlock(8, 8, 8, stone)
+			tc.light(c, tc.sky, tc.block)
 
-	const bytesPerFace = 6 * 4
-	for face, exp := range expected {
-		off := face * bytesPerFace
-		for v := 0; v < 6; v++ {
-			i := off + v*4
-			r, g, b, a := data.Colors[i], data.Colors[i+1], data.Colors[i+2], data.Colors[i+3]
-			if want := exp.sky * 17; r != want {
-				t.Errorf("face %d vertex %d: R = %d, want %d", face, v, r, want)
+			data := mesh.GenerateChunkMeshData(c, w, nil)
+			if data == nil {
+				t.Fatal("expected mesh data, got nil")
 			}
-			if want := exp.block * 17; g != want {
-				t.Errorf("face %d vertex %d: G = %d, want %d", face, v, g, want)
+
+			const bytesPerFace = 6 * 4
+			off := tc.face * bytesPerFace
+			for v := 0; v < 6; v++ {
+				i := off + v*4
+				r, g, b, a := data.Colors[i], data.Colors[i+1], data.Colors[i+2], data.Colors[i+3]
+				if want := tc.sky * 17; r != want {
+					t.Errorf("vertex %d: R = %d, want %d", v, r, want)
+				}
+				if want := tc.block * 17; g != want {
+					t.Errorf("vertex %d: G = %d, want %d", v, g, want)
+				}
+				if b != 255 {
+					t.Errorf("vertex %d: B = %d, want 255", v, b)
+				}
+				if a != 255 {
+					t.Errorf("vertex %d: A = %d, want 255", v, a)
+				}
 			}
-			if b != 255 {
-				t.Errorf("face %d vertex %d: B = %d, want 255", face, v, b)
-			}
-			if a != 255 {
-				t.Errorf("face %d vertex %d: A = %d, want 255", face, v, a)
-			}
-		}
+		})
 	}
 }

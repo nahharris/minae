@@ -49,47 +49,76 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 	builder := meshBuilderPool.Get().(*meshBuilder)
 	builder.reset()
 
-	addQuad := func(x, y, z int, q model.Quad, skylight, blockLight uint8, uv atlas.UV) {
+	// addQuad emits one quad (two triangles) for the block at local (x,y,z)
+	// (global (gx,gy,gz)) covering face q.Face. Vertex colour packs per-vertex
+	// lighting inputs instead of true colour: R = skylight (0..15 mapped onto
+	// 0..255, exactly light*17), G = block light (same mapping, for glowstone
+	// and other emitters), B = ambient occlusion, A = opacity, always fully
+	// opaque. Alpha is deliberately never used to carry light: raylib blends
+	// by default, so a dark-but-alpha'd vertex used to render as see-through
+	// sky instead of dark. Per-face brightness (e.g. top brighter than sides)
+	// is applied in the shader, not baked in here, so it stays tunable
+	// without re-meshing.
+	//
+	// Light and AO are sampled per corner rather than once for the whole
+	// quad, so a single face can carry a gradient. Positions, texture
+	// coordinates and colours are computed into per-corner arrays first and
+	// only then emitted, in one order decided once, so a triangulation flip
+	// (done to avoid the classic voxel AO crease) can never desynchronise a
+	// vertex's position from another vertex's UV or colour.
+	addQuad := func(x, y, z, gx, gy, gz int, q model.Quad, uv atlas.UV) {
 		fx, fy, fz := float32(x), float32(y), float32(z)
 
 		n := normalForFace(q.Face)
 
-		p1, p2, p3, p4 := q.V1, q.V2, q.V3, q.V4
-		builder.vertices = append(builder.vertices,
-			fx+p1.X, fy+p1.Y, fz+p1.Z,
-			fx+p2.X, fy+p2.Y, fz+p2.Z,
-			fx+p3.X, fy+p3.Y, fz+p3.Z,
-			fx+p1.X, fy+p1.Y, fz+p1.Z,
-			fx+p3.X, fy+p3.Y, fz+p3.Z,
-			fx+p4.X, fy+p4.Y, fz+p4.Z,
-		)
+		positions := [4]model.Vec3{q.V1, q.V2, q.V3, q.V4}
 
-		// Vertex colour packs per-vertex lighting inputs instead of true colour:
-		// R = skylight (0..15 mapped onto 0..255, exactly light*17), G = block
-		// light (0..15 mapped onto 0..255, exactly light*17, for glowstone and
-		// other emitters), B = ambient occlusion (reserved, unimplemented, so
-		// fully unoccluded), A = opacity, always fully opaque. Alpha is
-		// deliberately never used to carry light: raylib blends by default, so
-		// a dark-but-alpha'd vertex used to render as see-through sky instead
-		// of dark. Per-face brightness (e.g. top brighter than sides) is
-		// applied in the shader, not baked in here, so it stays tunable
-		// without re-meshing.
-		skylightColor := skylight * 17
-		blockLightColor := blockLight * 17
-		for range 6 {
-			builder.normals = append(builder.normals, n.X, n.Y, n.Z)
-			builder.colors = append(builder.colors, skylightColor, blockLightColor, 255, 255)
+		var center model.Vec3
+		for _, p := range positions {
+			center.X += p.X
+			center.Y += p.Y
+			center.Z += p.Z
+		}
+		center.X /= 4
+		center.Y /= 4
+		center.Z /= 4
+
+		var uvs [4][2]float32
+		var cols [4][4]uint8
+		var aoLevels [4]int
+		for i, p := range positions {
+			u, v := uvForVertex(q.Face, p, uv)
+			uvs[i] = [2]float32{u, v}
+
+			sky, block, ao, level := cornerLightAndAO(world, gx, gy, gz, q.Face, p, center)
+			cols[i] = [4]uint8{sky, block, ao, 255}
+			aoLevels[i] = level
 		}
 
-		u1, v1 := uvForVertex(q.Face, p1, uv)
-		u2, v2 := uvForVertex(q.Face, p2, uv)
-		u3, v3 := uvForVertex(q.Face, p3, uv)
-		u4, v4 := uvForVertex(q.Face, p4, uv)
+		// Default triangulation is (V1,V2,V3),(V1,V3,V4). When AO is
+		// asymmetric across that diagonal, flip to (V1,V2,V4),(V2,V3,V4) so
+		// the crease runs along the diagonal that actually has the AO
+		// discontinuity.
+		//
+		// This compares raw occlusion levels, not the ramped B-channel bytes.
+		// The two agree only while aoRamp is evenly spaced, and aoRamp is
+		// explicitly documented as free to tune — including non-linearly.
+		// Comparing the bytes would make an uneven ramp silently change which
+		// diagonal a quad splits along, reintroducing the crease this exists
+		// to remove.
+		order := [6]int{0, 1, 2, 0, 2, 3}
+		if aoLevels[0]+aoLevels[2] < aoLevels[1]+aoLevels[3] {
+			order = [6]int{0, 1, 3, 1, 2, 3}
+		}
 
-		builder.texcoords = append(builder.texcoords,
-			u1, v1, u2, v2, u3, v3,
-			u1, v1, u3, v3, u4, v4,
-		)
+		for _, idx := range order {
+			p := positions[idx]
+			builder.vertices = append(builder.vertices, fx+p.X, fy+p.Y, fz+p.Z)
+			builder.normals = append(builder.normals, n.X, n.Y, n.Z)
+			builder.texcoords = append(builder.texcoords, uvs[idx][0], uvs[idx][1])
+			c := cols[idx]
+			builder.colors = append(builder.colors, c[0], c[1], c[2], c[3])
+		}
 	}
 
 	quads := make([]model.Quad, 0, 16)
@@ -111,28 +140,8 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 
 				quads = blockModel.AppendQuads(quads[:0], meta)
 				for _, q := range quads {
-					dx, dy, dz := offsetForFace(q.Face)
-					nx, ny, nz := gx+dx, gy+dy, gz+dz
-
-					// The light engine treats an unloaded chunk as opaque (skylight 0)
-					// so that light never leaks in from nowhere. That is correct for
-					// the engine, but at the edge of the loaded world it would render
-					// the outward-facing faces as a black wall. That is a cosmetic
-					// problem for the renderer, not the engine, so we substitute
-					// full-bright here instead of changing what the engine reports.
-					//
-					// Block light gets no such fallback: there is no reason to pretend
-					// an unloaded chunk contains a torch, so it stays 0 whenever the
-					// neighbor chunk isn't loaded. The asymmetry with skylight above is
-					// intentional, not an oversight.
-					var light, blockLight uint8
-					if world.HasChunkAt(nx, nz) {
-						light = world.GetSkyLight(nx, ny, nz)
-						blockLight = world.GetBlockLight(nx, ny, nz)
-					} else {
-						light = 15
-					}
 					if q.Cull {
+						dx, dy, dz := offsetForFace(q.Face)
 						neighbor, nmeta := world.GetBlockState(gx+dx, gy+dy, gz+dz)
 						if neighbor != nil {
 							neighborModel := neighbor.Model
@@ -154,7 +163,7 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 						}
 					}
 
-					addQuad(x, y, z, q, light, blockLight, uv)
+					addQuad(x, y, z, gx, gy, gz, q, uv)
 				}
 			}
 		}
@@ -200,6 +209,199 @@ func offsetForFace(face model.Face) (dx, dy, dz int) {
 	default:
 		return 0, 0, -1
 	}
+}
+
+// aoRamp maps an ambient-occlusion level (0 = most occluded corner, 3 =
+// fully unoccluded) onto the mesh's B channel. The levels sit at 0.4, 0.6,
+// 0.8 and 1.0 of full brightness; tune these four values freely if the AO
+// contrast needs adjusting, including non-linearly.
+//
+// Nothing else depends on their spacing, and that is deliberate: the
+// triangulation flip compares raw occlusion levels rather than these bytes,
+// so an uneven ramp cannot quietly change which diagonal a quad splits along.
+var aoRamp = [4]uint8{102, 153, 204, 255}
+
+// cellSample holds the per-cell state the smooth-lighting and ambient-
+// occlusion sampling needs: the two light channels and whether the cell lets
+// light through (see sampleCell for what "transparent" means at chunk
+// boundaries).
+type cellSample struct {
+	sky, block  uint8
+	transparent bool
+}
+
+// sampleCell reads the light and solidity of one global cell for the
+// purposes of smooth lighting and AO.
+//
+// The light engine treats an unloaded chunk as opaque (skylight 0) so that
+// light never leaks in from nowhere; that is correct for the engine, but at
+// the edge of the loaded world it would render the outward-facing faces as a
+// black wall. That is a cosmetic problem for the renderer, not the engine,
+// so an unloaded chunk substitutes full-bright skylight here instead of
+// changing what the engine reports. Block light gets no such fallback: there
+// is no reason to pretend an unloaded chunk contains a torch, so it stays 0.
+// A cell in an unloaded chunk is also treated as transparent, matching that
+// same "pretend it's open space" fallback rather than "pretend it's solid
+// rock", and consistent with GetBlockState already reporting air (nil) for
+// any position in a chunk that isn't loaded.
+func sampleCell(world WorldReader, x, y, z int) cellSample {
+	block, _ := world.GetBlockState(x, y, z)
+	if !world.HasChunkAt(x, z) {
+		return cellSample{sky: 15, block: 0, transparent: block == nil}
+	}
+	return cellSample{
+		sky:         world.GetSkyLight(x, y, z),
+		block:       world.GetBlockLight(x, y, z),
+		transparent: block == nil,
+	}
+}
+
+// faceAxes returns the two local-space axis indices (0=X, 1=Y, 2=Z) tangent
+// to the given face, i.e. the two axes perpendicular to the face's own
+// normal axis. It depends only on which axis is normal, so a face and its
+// opposite (e.g. top and bottom) return the same pair.
+func faceAxes(face model.Face) (axisU, axisW int) {
+	switch face {
+	case model.FaceRight, model.FaceLeft:
+		return 1, 2 // Y, Z
+	case model.FaceTop, model.FaceBottom:
+		return 0, 2 // X, Z
+	default: // FaceFront, FaceBack
+		return 0, 1 // X, Y
+	}
+}
+
+// vecComponent returns the given axis (0=X, 1=Y, 2=Z) component of v.
+func vecComponent(v model.Vec3, axis int) float32 {
+	switch axis {
+	case 0:
+		return v.X
+	case 1:
+		return v.Y
+	default:
+		return v.Z
+	}
+}
+
+// signOffset reports the sign of v-c as -1, 0 or 1. It returns 0 exactly
+// when v == c, which callers use to detect a degenerate quad corner (one
+// that does not lie strictly to one side of the quad's centre).
+func signOffset(v, c float32) int {
+	switch {
+	case v > c:
+		return 1
+	case v < c:
+		return -1
+	default:
+		return 0
+	}
+}
+
+// axisOffset turns a sign (-1, 0 or 1) along the given axis (0=X, 1=Y, 2=Z)
+// into an integer cell offset.
+func axisOffset(axis, sign int) (dx, dy, dz int) {
+	switch axis {
+	case 0:
+		return sign, 0, 0
+	case 1:
+		return 0, sign, 0
+	default:
+		return 0, 0, sign
+	}
+}
+
+// averageChannel averages one light channel (chosen by get) over whichever
+// of the four cells are transparent, in 0..255 space, so precision is not
+// lost by averaging 0..15 levels first. Opaque cells are excluded rather
+// than counted as zero. If none of the four are transparent, it falls back
+// to the value at a (the cell the face looks into), even though a is itself
+// excluded from the ambient-occlusion neighbourhood below.
+func averageChannel(a, b, c, d cellSample, get func(cellSample) uint8) uint8 {
+	sum, count := 0, 0
+	for _, s := range [4]cellSample{a, b, c, d} {
+		if !s.transparent {
+			continue
+		}
+		sum += int(get(s)) * 17
+		count++
+	}
+	if count == 0 {
+		return get(a) * 17
+	}
+	return uint8(sum / count)
+}
+
+// boolToInt converts a bool to 0 or 1, for the ambient-occlusion formula
+// below which is stated in those terms.
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// cornerLightAndAO computes the smoothed skylight and block light, and the
+// ambient-occlusion byte, for one corner of a quad on the given face. The
+// quad's parent block sits at global cell (gx,gy,gz); corner is that
+// corner's position and center the quad's centroid, both in the block's
+// local (0..1) space.
+//
+// The four cells touching the corner on the outward side are:
+//
+//	a = p + n          (the cell the face looks into)
+//	b = p + n + u
+//	c = p + n + w
+//	d = p + n + u + w
+//
+// where n is the face's outward offset and u, w are unit offsets along the
+// face's two tangent axes, pointing from the quad's centre toward this
+// corner. Light is the average of a, b, c and d (excluding opaque cells);
+// ambient occlusion uses only b, c and d, per the classic voxel AO rule:
+// fully occluded when both b and c are solid, otherwise 3 minus the number
+// of solid cells among b, c and d.
+//
+// Quads are model-driven and need not lie on the cube boundary (a slab's top
+// face sits at y=0.5); such faces still sample as if they were the cube's
+// own face, per the existing offsetForFace convention.
+//
+// If a corner is degenerate -- its position does not lie strictly to one
+// side of the centre along one of the tangent axes -- this falls back to the
+// pre-smoothing behaviour for that corner: no occlusion, light sampled from
+// a alone, so a zero tangent offset can never produce a divide-by-zero or a
+// nonsense neighbour cell.
+func cornerLightAndAO(world WorldReader, gx, gy, gz int, face model.Face, corner, center model.Vec3) (skylightByte, blockLightByte, aoByte uint8, aoLevel int) {
+	nx, ny, nz := offsetForFace(face)
+	axisU, axisW := faceAxes(face)
+
+	su := signOffset(vecComponent(corner, axisU), vecComponent(center, axisU))
+	sw := signOffset(vecComponent(corner, axisW), vecComponent(center, axisW))
+
+	a := sampleCell(world, gx+nx, gy+ny, gz+nz)
+
+	if su == 0 || sw == 0 {
+		return a.sky * 17, a.block * 17, aoRamp[3], 3
+	}
+
+	ux, uy, uz := axisOffset(axisU, su)
+	wx, wy, wz := axisOffset(axisW, sw)
+
+	b := sampleCell(world, gx+nx+ux, gy+ny+uy, gz+nz+uz)
+	c := sampleCell(world, gx+nx+wx, gy+ny+wy, gz+nz+wz)
+	d := sampleCell(world, gx+nx+ux+wx, gy+ny+uy+wy, gz+nz+uz+wz)
+
+	skylightByte = averageChannel(a, b, c, d, func(s cellSample) uint8 { return s.sky })
+	blockLightByte = averageChannel(a, b, c, d, func(s cellSample) uint8 { return s.block })
+
+	side1Solid := !b.transparent
+	side2Solid := !c.transparent
+	cornerSolid := !d.transparent
+
+	level := 3 - boolToInt(side1Solid) - boolToInt(side2Solid) - boolToInt(cornerSolid)
+	if side1Solid && side2Solid {
+		level = 0
+	}
+
+	return skylightByte, blockLightByte, aoRamp[level], level
 }
 
 func quadRegion(q model.Quad) model.Rect {
