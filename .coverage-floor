@@ -6,4 +6,5 @@
 # 2026-09-05  M1  21.0  (measured 21.3 after the test harness landed)
 # 2026-09-05  M2  21.5  (measured 21.5; internal/core landed at 100%)
 # 2026-09-05  M3  29.0  (measured 29.4; world/lighting went 0% -> 94.2%)
-29.0
+# 2026-09-05  M4  31.0  (measured 31.6)
+31.0

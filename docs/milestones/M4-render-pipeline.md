@@ -1,6 +1,6 @@
 # M4 — Get light onto the screen
 
-**Status:** 📋 Planned
+**Status:** 🚧 Code complete, awaiting visual sign-off
 **Design:** [2026-09-05 lighting and foundations](../superpowers/specs/2026-09-05-lighting-and-foundations-design.md)
 
 ## Goal
@@ -8,98 +8,119 @@
 Make the light that M3 computes actually reach a pixel, and make the day cycle
 read as realistic colour.
 
-## What is wrong today
+## What was wrong
 
-The mesh builder encodes skylight into the vertex **alpha** channel and leaves
-RGB at 255. The fragment shader then computes `texelColor * fragColor`.
-Multiplying alpha by alpha never touches RGB, so the entire skylight
-calculation is discarded before it reaches a pixel.
+**Light travelled in the alpha channel.** The mesh builder packed skylight into
+vertex alpha and left RGB white; the fragment shader ended with
+`finalColor = texel * fragColor * lighting`, so that alpha landed in
+`finalColor.a`. raylib blends by default, so **a dark block rendered transparent
+rather than dark** — the sky showed through it, which reads as brighter than a
+lit block, and a cave got visibly brighter the deeper it went.
 
-The only surviving term is a directional diffuse, and it is also wrong.
-`TimeOfDay.GetLightingState` builds `lightDir` as `(cos(h·2π), sin(h·2π), 0.2)`,
-which at noon (`h = 0.5`) is `(-1, 0, 0.2)` — horizontal. Top faces therefore
-receive `diff ≈ 0` at every hour of the day; the sun never shines downward. The
-constant `Z = 0.2` tilt is what leaves the −Z faces responding only to ambient.
+This bug predates M3, but M3 is what made it obvious. Before M3 the engine could
+not darken anything and light did not cross chunk seams, so nearly every cell
+sat at 15 and alpha was 255 almost everywhere. M3 started computing correct
+darkness, and correct darkness poured into a broken channel.
 
-`getStateFromTime` also has a dead zone for `hour ∈ [0, 0.2)`: no day state
-matches, it falls through to `nightState`, whose `NextState` is `nil`, so
-colour snaps instead of interpolating.
+**The sun never shone downward.** `lightDir` was `(cos(h·2π), sin(h·2π), 0.2)`.
+At hour 0.25 that is `(0, 1, 0.2)`, so `dot(normal, -lightDir)` on a top face is
+about −0.98, clamped to zero. At noon it is horizontal. There was no hour at
+which top faces received any diffuse light, so the world sat at bare ambient —
+about 31% brightness — and the constant `Z = 0.2` tilt is what left the −Z faces
+responding to nothing but ambient.
 
-## Target shape
-
-**Vertex payload:** `R = skylight × 17` (0–15 mapped onto 0–255),
-`G = blocklight × 17` (always 0 until torches exist), `B = 255` (ambient
-occlusion channel, reserved but unimplemented), `A = 255` (alpha freed for real
-transparency later).
-
-**Fragment shader:**
-
-```glsl
-vec3 sky   = skyTint   * fragColor.r;
-vec3 block = blockTint * fragColor.g;
-vec3 light = max(sky, block) * faceBias(normal) * fragColor.b;
-finalColor = vec4(texel.rgb * max(light, minAmbient), texel.a * fragColor.a);
-```
-
-Face bias lives in the shader rather than baked into vertices, so it stays
-tunable without re-meshing: top 1.00, ±X 0.80, ±Z 0.60, bottom 0.50. This
-constant per-face step supplies the sense of depth and directly replaces the
-broken N·L term.
+**The day cycle snapped.** `getStateFromTime` had no state matching
+`hour ∈ [0, 0.2)` and fell through to a terminal night state with a nil
+successor, so colour jumped instead of easing.
 
 ## Steps
 
-- [ ] Change the mesh builder to pack light into `R`, with `G = 0`, `B = 255`,
-      `A = 255`.
-- [ ] Rewrite `fragment.glsl` per the shape above.
-- [ ] Add `faceBias` derived from the fragment normal.
-- [ ] Drop the per-vertex `transpose(inverse(matModel))` from `vertex.glsl`.
-      Chunk transforms are pure translation, so it is wasted work every frame.
-- [ ] Replace the `lightDir` / `lightColor` / `ambientColor` uniforms with
+- [x] Pack light into vertex colour: `R = skylight × 17`, `G = 0` (block light,
+      reserved), `B = 255` (ambient occlusion, reserved), `A = 255` (opacity,
+      constant). Alpha is freed for real transparency later.
+- [x] Rewrite `fragment.glsl` to read the packed payload from RGB.
+- [x] Add `faceBias` in the shader — top 1.00, ±X 0.80, ±Z 0.60, bottom 0.50.
+- [x] Drop the per-vertex `transpose(inverse(matModel))` from `vertex.glsl`.
+- [x] Replace the `lightDir` / `lightColor` / `ambientColor` uniforms with
       `skyTint`, `blockTint` and `minAmbient`.
-- [ ] Make the day-state ring circular (`night → dawn`) to eliminate the dead
-      zone at `hour ∈ [0, 0.2)`.
-- [ ] Interpolate in linear float space rather than sRGB `uint8`, which is why
-      the current ramps read muddy.
-- [ ] Delete `lightDir` and its plumbing through `SceneRenderer`.
-- [ ] Raise `.coverage-floor`.
+- [x] Make the day-state ring circular; interpolate in linear float space;
+      delete `lightDir` and the dead `SunIntensity`.
+- [x] Raise `.coverage-floor` from 29.0 to 31.0.
+- [ ] **Manual visual verification** — see the checklist below.
 
-## Day cycle keyframes
+## The model
 
-Tunable live against the running game; these are a starting point.
+Baked per-voxel skylight is the source of truth. Time of day is a single
+`skyTint` uniform multiplying it, so the day cycle costs **zero re-meshing** and
+enclosed spaces correctly ignore it.
 
-| hour | phase    | skyTint                        |
-|------|----------|--------------------------------|
-| 0.00 | midnight | deep blue `(0.16, 0.18, 0.32)` |
-| 0.27 | sunrise  | orange `(1.00, 0.60, 0.35)`    |
-| 0.50 | noon     | warm white `(1.00, 0.98, 0.92)`|
-| 0.76 | sunset   | orange-red `(1.00, 0.55, 0.30)`|
-| 0.82 | dusk     | violet `(0.40, 0.30, 0.40)`    |
+```glsl
+vec3 light = max(skyTint * sky, blockTint * block);
+light *= faceBias(normalize(fragNormal)) * ao;
+light = max(light, vec3(minAmbient));
+finalColor = vec4(texelColor.rgb * light, texelColor.a * fragColor.a);
+```
 
-## Tests
+Face bias lives in the shader rather than baked into vertices, so it stays
+tunable without regenerating every chunk mesh. On axis-aligned cubes that
+constant per-orientation step is what supplies the sense of depth, and it is the
+direct replacement for the broken N·L term.
 
-- [ ] Vertex colour packing: a known light level produces the expected `R`, and
-      `G`/`B`/`A` hold their reserved values.
-- [ ] Face bias is *not* baked into vertex colour — two faces of the same block
-      at the same light level get identical vertex colours.
-- [ ] Day cycle is continuous: sampling `skyTint` across the whole cycle,
-      including the wrap at 1.0 → 0.0, shows no discontinuity above a small
-      epsilon.
-- [ ] `getStateFromTime` returns a state with a non-nil successor for every
-      hour in `[0, 1)`.
+`minAmbient` (0.035) keeps a sealed cave dim rather than pure black. It is a
+playability floor, not a physical term.
 
-## Manual verification
+## Testing a thing that cannot be tested
 
-Shaders cannot be unit tested, so this checklist runs before the milestone is
-marked done:
+Shaders have no unit tests, so three narrower guards were added instead.
 
-- [ ] Stand in an enclosed cave with no opening — it is genuinely dark, and it
-      stays dark as the day cycle advances.
-- [ ] Dig a one-block shaft to the surface — the column below is bright, and
-      light falls off with distance sideways from the shaft.
-- [ ] Break a ceiling block — the space below brightens immediately.
-- [ ] Place a block over a lit area — it darkens immediately.
-- [ ] Do the same on a chunk boundary — the neighbouring chunk updates too.
-- [ ] Watch a full day cycle — deep blue at night, orange through sunrise,
-      warm white at noon, orange-red at sunset, with no snap at any point.
-- [ ] All six faces of a block are distinguishable: the top is brightest, the
-      bottom darkest, and no face is unlit.
+**`shader_uniforms_test.go`** — uniforms bind by string. If a name drifts
+between Go and GLSL, `GetShaderLocation` returns −1 and `SetShaderValue` is a
+silent no-op, leaving the world lit by whatever the uniform defaults to. Nothing
+in build, vet, lint or tests would notice. The names are now constants, checked
+in both directions against the real GLSL source. The same file asserts that
+`fragColor.a` never reaches the RGB term — pinning the alpha bug shut — and that
+`inverse(` stays out of the vertex shader.
+
+**`shader_compile_gpu_test.go`** — behind a `gpu` build tag, because it needs a
+display and CI runners have none. It opens a hidden 64×64 window, compiles the
+real shaders, and asserts every uniform resolves. A GLSL error otherwise makes
+raylib log and quietly substitute its own default shader, so the program runs
+and merely looks wrong.
+
+```bash
+mise run test:shaders
+```
+
+**Mutation testing** confirmed each guard fails when it should:
+
+| Mutation | Caught by |
+|---|---|
+| Day-state ring not circular | continuity test — `skyTint.R jumped by 0.25 at hour 0.820` |
+| Missing semicolon in `fragment.glsl` | GPU probe — uniforms fail to resolve |
+| Comment mentioning `inverse(` | the `inverse(` guard, which is why it strips comments first |
+
+## Manual verification checklist
+
+The final verdict on this milestone is visual. Run the game and check:
+
+- [ ] An enclosed cave with no opening is genuinely dark, and stays dark as the
+      day cycle advances.
+- [ ] A one-block shaft to the surface leaves the column below bright, with
+      light falling off sideways from the shaft.
+- [ ] Breaking a ceiling block brightens the space below immediately.
+- [ ] Placing a block over a lit area darkens it immediately.
+- [ ] The same, done on a chunk boundary — the neighbouring chunk updates too.
+- [ ] Nothing is see-through. Shadowed faces are *dark*, not transparent.
+- [ ] A full day cycle: deep blue at night, orange through sunrise, warm white
+      at noon, orange-red at sunset, with no snap at any point.
+- [ ] All six faces of a block are distinguishable, top brightest and bottom
+      darkest, with no face unlit.
+
+## Verification
+
+```bash
+mise run ci            # build, vet, race tests, coverage floor, lint
+mise run test:shaders  # GLSL compiles on real hardware (needs a display)
+```
+
+Total coverage 31.6%, floor raised to 31.0.

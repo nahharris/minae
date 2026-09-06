@@ -7,117 +7,28 @@ import (
 	"github.com/nahharris/minae/internal/platform/config"
 )
 
-// DayState represents the lighting configuration at a specific time of day.
-type DayState struct {
-	SkyColor     core.RGBA
-	SunColor     core.RGBA
-	AmbientColor core.RGBA
-	SunIntensity float32
-	PeakTime     float32
-	NextState    *DayState
+// keyframe is a single point in the day/night cycle: an hour in [0, 1)
+// paired with the sky background colour and the skylight tint that apply at
+// that instant.
+type keyframe struct {
+	hour    float32
+	sky     core.RGBA
+	skyTint core.RGB
 }
 
-// lerpColor interpolates between two colors
-func lerpColor(c1, c2 core.RGBA, t float32) core.RGBA {
-	return core.RGBA{
-		R: uint8(lerpFloat(float32(c1.R), float32(c2.R), t)),
-		G: uint8(lerpFloat(float32(c1.G), float32(c2.G), t)),
-		B: uint8(lerpFloat(float32(c1.B), float32(c2.B), t)),
-		A: uint8(lerpFloat(float32(c1.A), float32(c2.A), t)),
-	}
-}
-
-// lerpFloat interpolates between two floats
-func lerpFloat(f1, f2 float32, t float32) float32 {
-	return f1 + (f2-f1)*t
-}
-
-// LerpColors interpolates the colors between this state and the next state.
-func (s *DayState) LerpColors(hour float32) (sky, sun, ambient core.RGBA, intensity float32) {
-	if s.NextState == nil {
-		return s.SkyColor, s.SunColor, s.AmbientColor, s.SunIntensity
-	}
-
-	next := s.NextState
-	den := next.PeakTime - s.PeakTime
-	if den == 0 {
-		return next.SkyColor, next.SunColor, next.AmbientColor, next.SunIntensity
-	}
-
-	t := (hour - s.PeakTime) / den
-	return lerpColor(s.SkyColor, next.SkyColor, t),
-		lerpColor(s.SunColor, next.SunColor, t),
-		lerpColor(s.AmbientColor, next.AmbientColor, t),
-		lerpFloat(s.SunIntensity, next.SunIntensity, t)
-}
-
-var (
-	// Key States
-	nightState = &DayState{
-		SkyColor:     core.RGBA{R: 10, G: 10, B: 30, A: 255},
-		SunColor:     core.RGBA{R: 20, G: 20, B: 40, A: 255}, // Moon light
-		AmbientColor: core.RGBA{R: 10, G: 10, B: 20, A: 255},
-		SunIntensity: 0.2,
-		PeakTime:     0.8,
-		NextState:    nil,
-	}
-	sunsetState = &DayState{
-		SkyColor:     core.RGBA{R: 255, G: 100, B: 50, A: 255},
-		SunColor:     core.RGBA{R: 255, G: 150, B: 100, A: 255},
-		AmbientColor: core.RGBA{R: 80, G: 50, B: 50, A: 255},
-		SunIntensity: 0.6,
-		PeakTime:     0.75,
-		NextState:    nightState,
-	}
-	afternoonState = &DayState{
-		SkyColor:     core.RGBA{R: 255, G: 210, B: 140, A: 255}, // Soft orange-yellow sky
-		SunColor:     core.RGBA{R: 255, G: 230, B: 180, A: 255}, // Pale orange sun
-		AmbientColor: core.RGBA{R: 200, G: 170, B: 110, A: 255}, // Warm orange ambient
-		SunIntensity: 1.0,
-		PeakTime:     0.7,
-		NextState:    sunsetState,
-	}
-	noonState = &DayState{
-		SkyColor:     core.RGBA{R: 135, G: 206, B: 235, A: 255},
-		SunColor:     core.RGBA{R: 255, G: 255, B: 255, A: 255},
-		AmbientColor: core.RGBA{R: 100, G: 100, B: 100, A: 255},
-		SunIntensity: 1.0,
-		PeakTime:     0.5,
-		NextState:    afternoonState,
-	}
-	morningState = &DayState{
-		SkyColor:     core.RGBA{R: 200, G: 220, B: 255, A: 255}, // Soft white-blue morning sky
-		SunColor:     core.RGBA{R: 230, G: 220, B: 200, A: 255}, // Gentle, warmer morning sun
-		AmbientColor: core.RGBA{R: 120, G: 140, B: 170, A: 255}, // Softer blue ambient for morning
-		SunIntensity: 0.7,
-		PeakTime:     0.3,
-		NextState:    noonState,
-	}
-	sunriseState = &DayState{
-		SkyColor:     core.RGBA{R: 255, G: 180, B: 100, A: 255},
-		SunColor:     core.RGBA{R: 255, G: 200, B: 100, A: 255},
-		AmbientColor: core.RGBA{R: 80, G: 60, B: 60, A: 255},
-		SunIntensity: 0.6,
-		PeakTime:     0.25,
-		NextState:    morningState,
-	}
-	dawnState = &DayState{
-		SkyColor:     nightState.SkyColor,
-		SunColor:     nightState.SunColor,
-		AmbientColor: nightState.AmbientColor,
-		SunIntensity: nightState.SunIntensity,
-		PeakTime:     0.2,
-		NextState:    sunriseState,
-	}
-)
-
-var dayStates = []*DayState{
-	dawnState,
-	sunriseState,
-	morningState,
-	noonState,
-	afternoonState,
-	sunsetState,
+// keyframes are the day/night cycle's fixed points, ordered by hour
+// ascending. The ring is circular: sampleKeyframes wraps from the last entry
+// back to the first, treating keyframes[0] as if it also sat at hour 1.0, so
+// every hour in [0, 1) has a defined, continuous value.
+var keyframes = []keyframe{
+	{hour: 0.00, sky: core.RGBA{R: 10, G: 10, B: 30, A: 255}, skyTint: core.RGB{R: 0.16, G: 0.18, B: 0.32}},
+	{hour: 0.22, sky: core.RGBA{R: 60, G: 50, B: 80, A: 255}, skyTint: core.RGB{R: 0.45, G: 0.35, B: 0.42}},
+	{hour: 0.27, sky: core.RGBA{R: 255, G: 150, B: 90, A: 255}, skyTint: core.RGB{R: 1.00, G: 0.60, B: 0.35}},
+	{hour: 0.35, sky: core.RGBA{R: 200, G: 220, B: 255, A: 255}, skyTint: core.RGB{R: 1.00, G: 0.90, B: 0.75}},
+	{hour: 0.50, sky: core.RGBA{R: 135, G: 206, B: 235, A: 255}, skyTint: core.RGB{R: 1.00, G: 0.98, B: 0.92}},
+	{hour: 0.68, sky: core.RGBA{R: 255, G: 225, B: 170, A: 255}, skyTint: core.RGB{R: 1.00, G: 0.92, B: 0.78}},
+	{hour: 0.76, sky: core.RGBA{R: 255, G: 110, B: 55, A: 255}, skyTint: core.RGB{R: 1.00, G: 0.55, B: 0.30}},
+	{hour: 0.82, sky: core.RGBA{R: 50, G: 40, B: 70, A: 255}, skyTint: core.RGB{R: 0.40, G: 0.30, B: 0.40}},
 }
 
 // TimeOfDay manages the game day cycle.
@@ -142,32 +53,114 @@ func (t *TimeOfDay) Update(dt float32) {
 	}
 }
 
-// GetLightingState returns the current lighting configuration based on time.
-func (t *TimeOfDay) GetLightingState() (skyColor, lightColor, ambientColor core.RGBA, lightDir core.Vec3) {
-	// Map time to 0-24 hour scale for easier reasoning (0.0 - 1.0)
-	hour := (t.Time / t.CycleDuration)
-
-	state := getStateFromTime(hour)
-	skyColor, lightColor, ambientColor, _ = state.LerpColors(hour)
-
-	// Calculate Sun Direction
-	// Angle 0 at 6am.
-	angle := hour * 2.0 * math.Pi
-
-	sinVal := float32(math.Sin(float64(angle)))
-	cosVal := float32(math.Cos(float64(angle)))
-
-	lightDir = core.Vec3{X: cosVal, Y: sinVal, Z: 0.2} // Slight Z tilt
-	lightDir = lightDir.Normalize()
-
-	return
+// GetLightingState returns the background sky colour and the tint applied to
+// baked skylight for the current time of day.
+func (t *TimeOfDay) GetLightingState() (sky core.RGBA, skyTint core.RGB) {
+	hour := normalizeHour(t.Time / t.CycleDuration)
+	return sampleKeyframes(hour)
 }
 
-func getStateFromTime(hour float32) *DayState {
-	for _, state := range dayStates {
-		if hour >= state.PeakTime && (state.NextState == nil || hour < state.NextState.PeakTime) {
-			return state
-		}
+// normalizeHour wraps hour into [0, 1), regardless of any drift or negative
+// input, so sampleKeyframes never sees a value outside the range its ring
+// covers.
+func normalizeHour(hour float32) float32 {
+	h := float32(math.Mod(float64(hour), 1.0))
+	if h < 0 {
+		h += 1.0
 	}
-	return nightState
+	return h
+}
+
+// sampleKeyframes interpolates the sky colour and skylight tint for hour,
+// which must be in [0, 1). The keyframe ring is circular: after the last
+// keyframe it interpolates back to the first, treated as hour 1.0, so there
+// is no discontinuity anywhere in the cycle, including across the wrap from
+// the last keyframe back to midnight.
+func sampleKeyframes(hour float32) (sky core.RGBA, skyTint core.RGB) {
+	n := len(keyframes)
+	for i := range n {
+		cur := keyframes[i]
+		next := keyframes[(i+1)%n]
+		nextHour := next.hour
+		if i == n-1 {
+			nextHour = 1.0
+		}
+
+		if hour < cur.hour || hour >= nextHour {
+			continue
+		}
+
+		span := nextHour - cur.hour
+		var t float32
+		if span > 0 {
+			t = (hour - cur.hour) / span
+		}
+
+		return lerpRGBA(cur.sky, next.sky, t), lerpRGB(cur.skyTint, next.skyTint, t)
+	}
+
+	// Unreachable for hour in [0, 1) since keyframes[0].hour == 0, but return
+	// the first keyframe's values rather than a zero value if it ever is.
+	return keyframes[0].sky, keyframes[0].skyTint
+}
+
+// lerpRGB interpolates two linear-space colours by t. t is clamped to [0, 1]
+// defensively before use.
+func lerpRGB(a, b core.RGB, t float32) core.RGB {
+	t = clamp01(t)
+	return core.RGB{
+		R: lerpFloat(a.R, b.R, t),
+		G: lerpFloat(a.G, b.G, t),
+		B: lerpFloat(a.B, b.B, t),
+	}
+}
+
+// lerpRGBA interpolates two 8-bit colours by t. The interpolation happens in
+// float space and each channel is rounded, not truncated, when converting
+// back to uint8, and clamped to [0, 255]. t is clamped to [0, 1] defensively
+// before use.
+func lerpRGBA(a, b core.RGBA, t float32) core.RGBA {
+	t = clamp01(t)
+	return core.RGBA{
+		R: lerpChannel(a.R, b.R, t),
+		G: lerpChannel(a.G, b.G, t),
+		B: lerpChannel(a.B, b.B, t),
+		A: lerpChannel(a.A, b.A, t),
+	}
+}
+
+// lerpChannel interpolates one 8-bit channel in float space and rounds the
+// result back to uint8, clamping to [0, 255].
+func lerpChannel(c1, c2 uint8, t float32) uint8 {
+	return clampByte(lerpFloat(float32(c1), float32(c2), t))
+}
+
+// clampByte rounds v to the nearest integer and clamps it to [0, 255].
+func clampByte(v float32) uint8 {
+	rounded := math.Round(float64(v))
+	switch {
+	case rounded < 0:
+		return 0
+	case rounded > 255:
+		return 255
+	default:
+		return uint8(rounded)
+	}
+}
+
+// clamp01 clamps t to [0, 1].
+func clamp01(t float32) float32 {
+	switch {
+	case t < 0:
+		return 0
+	case t > 1:
+		return 1
+	default:
+		return t
+	}
+}
+
+// lerpFloat linearly interpolates between f1 and f2 by t.
+func lerpFloat(f1, f2, t float32) float32 {
+	return f1 + (f2-f1)*t
 }

@@ -39,3 +39,6 @@ func (v Vec3) Normalize() Vec3 {
 
 // RGBA is an 8-bit-per-channel colour.
 type RGBA struct{ R, G, B, A uint8 }
+
+// RGB is a linear-space colour with one float per channel, normally 0..1.
+type RGB struct{ R, G, B float32 }

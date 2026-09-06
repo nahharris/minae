@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M3](milestones/M3-light-engine.md).
+Last reviewed: 2026-09-05, at the close of [M4](milestones/M4-render-pipeline.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -48,23 +48,18 @@ pure package regains a raylib dependency, directly or transitively.
 
 ## Known broken
 
-**Lighting does not reach the screen.** This is the one that matters. The mesh
-builder writes skylight into the vertex *alpha* channel; the fragment shader
-then multiplies by it in a way that cannot affect RGB. The flood-fill is
-computed correctly as of M3 and then discarded before a single pixel sees it.
-Separately, the directional sun vector is horizontal at every hour, so top faces
-never light up, and the −Z faces respond only to ambient.
-[M4](milestones/M4-render-pipeline.md) closes this.
+Nothing in the lighting pipeline, as of M4 — but M4 has not had visual
+sign-off yet, so treat that as provisional until someone has watched a sunrise.
 
-**The day cycle snaps.** `getStateFromTime` has no matching state for
-`hour ∈ [0, 0.2)` and falls through to a terminal night state, so colour jumps
-rather than interpolating. Also in M4.
+Fixed across M3 and M4: light can be removed as well as added, so placing a
+block darkens what is beneath it; unloaded chunks are opaque rather than
+reporting full sky, so propagation crosses chunk seams; every chunk whose light
+changed is reported for re-meshing; light travels in vertex RGB rather than
+alpha, so dark blocks render dark instead of see-through; per-face bias replaced
+a directional sun that never pointed downward; and the day cycle ring is
+circular, so colour eases rather than snapping.
 
-Fixed in [M3](milestones/M3-light-engine.md), listed here because they were
-long-standing: light can now be removed as well as added, so placing a block
-darkens what is beneath it; unloaded chunks are opaque rather than reporting
-full sky, so propagation crosses chunk seams; and every chunk whose light
-changed is reported for re-meshing, including neighbours the edit never touched.
+For defects found but deliberately not fixed, see the roadmap.
 
 ## Working
 
@@ -94,7 +89,7 @@ changed is reported for re-meshing, including neighbours the edit never touched.
 | Persistence | Data model supports it | No serialisation to disk |
 | Textures | Three PNGs, colour fallback otherwise | Full block texture set |
 | Blocks | 6 types | Transparency, liquids, stairs, fences, doors |
-| Lighting | Skylight engine is correct as of M3, but the renderer still discards it | Getting it on screen (M4); block light sources |
+| Lighting | Skylight, rendered. Awaiting visual sign-off | Block light sources, ambient occlusion, smooth lighting |
 
 ## Verification
 
@@ -105,7 +100,7 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package, at the close of M3 (total 29.4%, floor 29.0):
+Coverage by package, at the close of M4 (total 31.6%, floor 31.0):
 
 | Package | Coverage |
 |---|---|
