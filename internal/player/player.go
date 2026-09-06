@@ -4,17 +4,42 @@ import (
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/internal/core"
+	"github.com/nahharris/minae/internal/physics"
 	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/world"
 )
 
+// Body dimensions and eye height, per the M13 player controller.
+const (
+	bodyWidth  float32 = 0.6
+	bodyHeight float32 = 1.8
+	bodyDepth  float32 = 0.6
+	eyeHeight  float32 = 1.62
+)
+
 // Player represents the first-person character in the game.
 // It handles camera movement and input processing.
+//
+// Body is the single source of truth for the player's position; Camera is
+// derived from it every Update, at Body.Position plus eye height. Nothing
+// else is allowed to write Camera.Position directly -- that is what keeps
+// the camera from ever drifting away from the body it is supposed to
+// represent.
 type Player struct {
-	State            *world.PlayerState // Reference to world's saveable state
-	Camera           rl.Camera3D        // Runtime-only
-	MovementSpeed    float32
+	State  *world.PlayerState // Reference to world's saveable state.
+	Body   physics.Body       // Source of truth for position.
+	Camera rl.Camera3D        // Runtime-only; derived from Body each Update.
+
+	// Flying is runtime movement-mode state, not persisted in PlayerState.
+	// While true, gravity and collision are off and Space/Ctrl ascend and
+	// descend instead of jumping.
+	Flying bool
+
+	WalkSpeed        float32
+	FlySpeed         float32
 	MouseSensitivity float32
+	PhysicsConfig    physics.Config
 
 	// Runtime Interaction State
 	SelectedBlockIndex int
@@ -22,83 +47,171 @@ type Player struct {
 	HasTarget          bool
 }
 
-// NewPlayer creates a new Player instance wrapping the given state.
+// NewPlayer creates a new Player instance wrapping the given state. The body
+// is spawned at the state's saved position; the camera is derived from it.
 func NewPlayer(state *world.PlayerState) *Player {
-	camera := rl.Camera3D{}
-	// Position initialized from state
-	camera.Position = rl.NewVector3(state.Position[0], state.Position[1], state.Position[2])
-	camera.Target = rl.Vector3Add(camera.Position, rl.NewVector3(1.0, 0.0, 0.0)) // Looking along +X
-	camera.Up = rl.NewVector3(0.0, 1.0, 0.0)
-	camera.Fovy = config.Current.FOV
-	camera.Projection = rl.CameraPerspective
+	body := physics.Body{
+		Position: core.Vec3{X: state.Position[0], Y: state.Position[1], Z: state.Position[2]},
+		Size:     core.Vec3{X: bodyWidth, Y: bodyHeight, Z: bodyDepth},
+	}
 
-	return &Player{
+	p := &Player{
 		State:            state,
-		Camera:           camera,
-		MovementSpeed:    config.Current.PlayerSpeed,
+		Body:             body,
+		WalkSpeed:        config.Current.WalkSpeed,
+		FlySpeed:         config.Current.FlySpeed,
 		MouseSensitivity: config.Current.MouseSens,
+		PhysicsConfig:    physics.DefaultConfig(),
+	}
+
+	camPos, camTarget := syncCameraToBody(p.Body, core.Vec3{X: 1.0, Y: 0.0, Z: 0.0}) // Looking along +X
+	p.Camera.Position = toRlVector3(camPos)
+	p.Camera.Target = toRlVector3(camTarget)
+	p.Camera.Up = rl.NewVector3(0.0, 1.0, 0.0)
+	p.Camera.Fovy = config.Current.FOV
+	p.Camera.Projection = rl.CameraPerspective
+
+	return p
+}
+
+// deriveCameraPosition returns the eye position for a body whose feet are at
+// bodyPos. This is the only place camera position is computed from body
+// position, so it is the one path every caller must go through -- there is
+// no other way to move the camera.
+func deriveCameraPosition(bodyPos core.Vec3) core.Vec3 {
+	return core.Vec3{X: bodyPos.X, Y: bodyPos.Y + eyeHeight, Z: bodyPos.Z}
+}
+
+// syncCameraToBody derives the eye position and look-at target for body,
+// preserving lookDir as the direction the camera faces. It is the single
+// computation Update relies on to keep the camera glued to the body every
+// frame; pulling it out as a plain function of values (no raylib, no
+// receiver mutation) is what makes that invariant directly testable.
+func syncCameraToBody(body physics.Body, lookDir core.Vec3) (position, target core.Vec3) {
+	position = deriveCameraPosition(body.Position)
+	target = core.Vec3{X: position.X + lookDir.X, Y: position.Y + lookDir.Y, Z: position.Z + lookDir.Z}
+	return position, target
+}
+
+// SyncFromState updates the body and camera position from the saveable
+// state. Call this when loading a game.
+func (p *Player) SyncFromState() {
+	p.Body.Position = core.Vec3{X: p.State.Position[0], Y: p.State.Position[1], Z: p.State.Position[2]}
+	p.Camera.Position = toRlVector3(deriveCameraPosition(p.Body.Position))
+}
+
+// SyncToState updates the saveable state from the body position. Call this
+// before saving.
+func (p *Player) SyncToState() {
+	p.State.Position = [3]float32{p.Body.Position.X, p.Body.Position.Y, p.Body.Position.Z}
+}
+
+// ToggleFlight flips the player's movement mode between walking and flying.
+// The mode is runtime-only: it is never written to PlayerState.
+func (p *Player) ToggleFlight() {
+	p.Flying = !p.Flying
+}
+
+// MovementInput is the raw per-tick input the controller needs, independent
+// of any input backend. Keeping it a plain struct (rather than reading
+// rl.IsKeyDown inline) is what lets BuildIntent be tested without raylib.
+type MovementInput struct {
+	Forward, Back, Left, Right bool
+	Jump                       bool
+	// Ascend and Descend only apply in fly mode.
+	Ascend, Descend bool
+}
+
+// BuildIntent constructs the physics.Intent for one tick from raw input and
+// the current horizontal look direction. It is pure: no raylib, no globals,
+// no I/O, so the mapping from input to intent is directly testable.
+//
+// lookDir need not be normalized or horizontal; only its X and Z components
+// are used. Diagonal movement (e.g. forward+right, or forward+ascend while
+// flying) is normalized so the resulting speed never exceeds walkSpeed or
+// flySpeed.
+func BuildIntent(in MovementInput, lookDir core.Vec3, flying bool, walkSpeed, flySpeed float32) physics.Intent {
+	forward := core.Vec3{X: lookDir.X, Z: lookDir.Z}.Normalize()
+	right := core.Vec3{X: -forward.Z, Z: forward.X}
+
+	var horizontal core.Vec3
+	if in.Forward {
+		horizontal.X += forward.X
+		horizontal.Z += forward.Z
+	}
+	if in.Back {
+		horizontal.X -= forward.X
+		horizontal.Z -= forward.Z
+	}
+	if in.Right {
+		horizontal.X += right.X
+		horizontal.Z += right.Z
+	}
+	if in.Left {
+		horizontal.X -= right.X
+		horizontal.Z -= right.Z
+	}
+
+	if !flying {
+		if horizontal.Length() > 0 {
+			horizontal = horizontal.Normalize()
+		}
+		return physics.Intent{
+			Move: core.Vec3{X: horizontal.X * walkSpeed, Z: horizontal.Z * walkSpeed},
+			Jump: in.Jump,
+		}
+	}
+
+	full := core.Vec3{X: horizontal.X, Z: horizontal.Z}
+	if in.Ascend {
+		full.Y++
+	}
+	if in.Descend {
+		full.Y--
+	}
+	if full.Length() > 0 {
+		full = full.Normalize()
+	}
+	return physics.Intent{
+		Fly:  true,
+		Move: core.Vec3{X: full.X * flySpeed, Y: full.Y * flySpeed, Z: full.Z * flySpeed},
 	}
 }
 
-// SyncFromState updates the camera position from the saveable state.
-// Call this when loading a game.
-func (p *Player) SyncFromState() {
-	p.Camera.Position = rl.NewVector3(p.State.Position[0], p.State.Position[1], p.State.Position[2])
-}
-
-// SyncToState updates the saveable state from the camera position.
-// Call this before saving.
-func (p *Player) SyncToState() {
-	p.State.Position = [3]float32{p.Camera.Position.X, p.Camera.Position.Y, p.Camera.Position.Z}
-}
-
-// Update handles player input and updates the camera position and orientation.
+// Update handles player input and updates the body and camera.
 // dt: Delta time since the last frame.
-func (p *Player) Update(dt float32) {
-	// Mouse input for looking around
+// grid supplies the collision geometry the physics step resolves against.
+func (p *Player) Update(dt float32, grid physics.Grid) {
+	// Mouse input for looking around.
 	mouseDelta := rl.GetMouseDelta()
-
-	// Rotate the camera based on mouse movement
 	p.rotateCamera(-mouseDelta.X*p.MouseSensitivity, -mouseDelta.Y*p.MouseSensitivity)
 
-	// Keyboard input for movement
-	var forward = rl.Vector3Subtract(p.Camera.Target, p.Camera.Position)
-	forward.Y = 0 // Keep movement horizontal for now (except space/ctrl)
-	forward = rl.Vector3Normalize(forward)
-
-	var right = rl.Vector3CrossProduct(forward, p.Camera.Up)
-	right = rl.Vector3Normalize(right)
-
-	var moveDir = rl.Vector3Zero()
-
-	if rl.IsKeyDown(rl.KeyW) {
-		moveDir = rl.Vector3Add(moveDir, forward)
-	}
-	if rl.IsKeyDown(rl.KeyS) {
-		moveDir = rl.Vector3Subtract(moveDir, forward)
-	}
-	if rl.IsKeyDown(rl.KeyD) {
-		moveDir = rl.Vector3Add(moveDir, right)
-	}
-	if rl.IsKeyDown(rl.KeyA) {
-		moveDir = rl.Vector3Subtract(moveDir, right)
-	}
-	if rl.IsKeyDown(rl.KeySpace) {
-		moveDir = rl.Vector3Add(moveDir, rl.NewVector3(0, 1, 0))
-	}
-	if rl.IsKeyDown(rl.KeyLeftControl) {
-		moveDir = rl.Vector3Subtract(moveDir, rl.NewVector3(0, 1, 0))
+	if rl.IsKeyPressed(rl.KeyF3) {
+		p.ToggleFlight()
 	}
 
-	if rl.Vector3Length(moveDir) > 0 {
-		moveDir = rl.Vector3Normalize(moveDir)
-		velocity := rl.Vector3Scale(moveDir, p.MovementSpeed*dt)
-		p.Camera.Position = rl.Vector3Add(p.Camera.Position, velocity)
-		p.Camera.Target = rl.Vector3Add(p.Camera.Target, velocity)
+	lookDir := toCoreVector3(rl.Vector3Subtract(p.Camera.Target, p.Camera.Position))
 
-		// Sync position back to state immediately for now
-		p.SyncToState()
+	in := MovementInput{
+		Forward: rl.IsKeyDown(rl.KeyW),
+		Back:    rl.IsKeyDown(rl.KeyS),
+		Right:   rl.IsKeyDown(rl.KeyD),
+		Left:    rl.IsKeyDown(rl.KeyA),
+		Jump:    rl.IsKeyDown(rl.KeySpace),
+		Ascend:  rl.IsKeyDown(rl.KeySpace),
+		Descend: rl.IsKeyDown(rl.KeyLeftControl),
 	}
+
+	intent := BuildIntent(in, lookDir, p.Flying, p.WalkSpeed, p.FlySpeed)
+	physics.Step(&p.Body, grid, p.PhysicsConfig, intent, dt)
+
+	// The camera is derived from the body every frame through this one path;
+	// nothing else in this method (or anywhere else) assigns Camera.Position.
+	camPos, camTarget := syncCameraToBody(p.Body, lookDir)
+	p.Camera.Position = toRlVector3(camPos)
+	p.Camera.Target = toRlVector3(camTarget)
+
+	p.SyncToState()
 
 	// Inventory Selection
 	mouseWheel := rl.GetMouseWheelMove()
@@ -142,4 +255,17 @@ func (p *Player) rotateCamera(yaw, pitch float32) {
 	direction.Z = r * float32(math.Cos(float64(theta))) * float32(math.Cos(float64(phi)))
 
 	p.Camera.Target = rl.Vector3Add(p.Camera.Position, direction)
+}
+
+// toRlVector3 converts a simulation vector into the raylib vector the camera
+// uses. This and toCoreVector3 are the only places Player crosses that
+// boundary.
+func toRlVector3(v core.Vec3) rl.Vector3 {
+	return rl.Vector3{X: v.X, Y: v.Y, Z: v.Z}
+}
+
+// toCoreVector3 converts a raylib vector into the simulation vector used by
+// BuildIntent and the physics step.
+func toCoreVector3(v rl.Vector3) core.Vec3 {
+	return core.Vec3{X: v.X, Y: v.Y, Z: v.Z}
 }

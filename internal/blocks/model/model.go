@@ -61,6 +61,10 @@ type Quad struct {
 	Cull bool
 }
 
+// Box is an axis-aligned region of a single voxel, in local coordinates where
+// 0,0,0 is the voxel's corner and 1,1,1 is the opposite corner.
+type Box struct{ Min, Max Vec3 }
+
 // BlockModel defines how a block instance is rendered and how it occludes
 // neighboring geometry for face culling.
 type BlockModel interface {
@@ -73,6 +77,10 @@ type BlockModel interface {
 
 	// Textures returns the set of texture keys referenced by this model.
 	Textures() []string
+
+	// CollisionBoxes appends the solid regions of this block instance, in
+	// local voxel coordinates, to dst and returns it.
+	CollisionBoxes(dst []Box, meta uint8) []Box
 }
 
 // ModelSpec is the YAML-friendly description of a block model.

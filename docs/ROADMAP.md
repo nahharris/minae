@@ -8,7 +8,7 @@ The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
 The lighting backlog is finished (M1-M7 done, M8 skipped). M12 landed the physics
-core; M13 wires it to the player.
+core and M13 wired it to the player: walking under gravity is now the default.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -21,7 +21,7 @@ core; M13 wires it to the player.
 | [M7](milestones/M7-smooth-lighting.md) | Smooth lighting and ambient occlusion | ✅ Done | Per-vertex light sampling and corner darkening |
 | [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | ⏭️ Skipped | Declined: reintroduces the bug class M4 fixed, for an effect nobody asked to see |
 | [M12](milestones/M12-collision-core.md) | Collision and gravity core | ✅ Done | Pure, GPU-free AABB resolver: gravity, jump, 0.6 step-up |
-| [M13](milestones/M13-player-controller.md) | Player controller | 📋 Planned | Give the player a body; walking by default, flight as a toggle |
+| [M13](milestones/M13-player-controller.md) | Player controller | ✅ Done | Give the player a body; walking by default, flight as a toggle |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done · ⏭️ Skipped
 
@@ -39,8 +39,9 @@ Not scheduled, and deliberately excluded from M1–M4. Roughly in the order that
 would make the game most playable soonest.
 
 **Gameplay foundations**
-- Player collision and gravity: planned as [M12](milestones/M12-collision-core.md)
-  and [M13](milestones/M13-player-controller.md).
+- Player collision and gravity: done in [M12](milestones/M12-collision-core.md) and
+  [M13](milestones/M13-player-controller.md). Sprinting, crouching and fall damage
+  are still open, as is a general entity system.
 - Noise-based terrain generation (currently a flat plane at y=32)
 - Infinite world: chunk streaming based on player position (currently a fixed 3×3 grid)
 - World persistence: save and load chunks, player state and time to disk

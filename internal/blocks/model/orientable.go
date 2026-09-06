@@ -33,6 +33,17 @@ func (m *Orientable) Textures() []string {
 	return m.base.Textures()
 }
 
+// CollisionBoxes delegates to the wrapped model without rotating the boxes.
+// Every shape that exists today (full blocks, sided blocks and slabs) is
+// symmetric under the 4-way Y rotation Orientable applies, so the unrotated
+// boxes are already correct for every facing. A future asymmetric shape
+// (e.g. stairs) will need the boxes actually rotated by meta's facing bits
+// the way AppendQuads rotates its quads; that rotation is deliberately not
+// implemented here because there is nothing asymmetric yet to rotate.
+func (m *Orientable) CollisionBoxes(dst []Box, meta uint8) []Box {
+	return m.base.CollisionBoxes(dst, meta)
+}
+
 func rotateFaceY(face Face, steps int) Face {
 	steps %= 4
 	if steps == 0 {
