@@ -1,6 +1,6 @@
 # M12 — Collision and gravity core
 
-**Status:** 📋 Planned
+**Status:** ✅ Done
 
 ## Objective
 
@@ -126,3 +126,60 @@ The first two are the load-bearing ones and are properties, not cases.
 Fall damage, health, swimming, sprinting, crouching, entity-vs-entity
 collision, and any general entity system. The player is the only body; a second
 one is what would justify generalising, and there isn't one.
+
+## Result
+
+`internal/physics` at 91.3% coverage; total 47.3%. The package imports only the
+standard library and `internal/core`, and is in `archtest`'s `purePackages`.
+
+### What the implementation chose
+
+**Contact snapping is computed from the obstacle, not from the body.** When a
+move is blocked, the body is placed at a fixed offset from the obstacle's face
+rather than backed off by its penetration depth. The landing position is
+therefore a pure function of the static box, independent of entry velocity — so
+a resting body recomputes the identical float every tick and is bit-exact
+stable, rather than merely close.
+
+That turned out to matter more than the epsilon gap itself: setting `epsilon` to
+zero leaves every property passing. Stability comes from the snap formula, not
+from the gap.
+
+**An overlapped body pushes out along the shortest axis**, bounded to eight
+iterations so a pathological grid cannot hang. A body that briefly clips is a
+better outcome than one that can never escape.
+
+**A substep-count cap** guards against unbounded work at degenerate velocities.
+It does not weaken the no-tunneling property: the resolver clamps within each
+substep regardless of substep size, and the property test confirms no tunneling
+at 10¹² blocks/s while also asserting the body actually reached the wall, so it
+cannot pass by standing still.
+
+### Verification
+
+Eight hand-written cases plus eight properties. Mutation testing on the
+properties:
+
+| Mutation | Caught by |
+|---|---|
+| No substepping | `NoTunnelingAtAnySpeed` — tunnels at 100 blocks/s |
+| X axis never collides | `BodyNeverEndsInsideGeometry` — inside a block by tick 160 |
+| Landing does not zero Y velocity | *nothing, initially* |
+
+That third row is the useful one. Position stays perfectly stable without
+zeroing the velocity, because the floor snaps the body back every tick — so the
+existing properties all passed while fall speed climbed without bound. The bug
+would only appear the moment the player stepped off a ledge, dropping at
+terminal velocity from standing.
+
+`RestingBodyDoesNotAccumulateFallSpeed` was added to close that, and it catches
+the mutation at 64 blocks/s of accumulated speed on tick 0.
+
+### A test that was wrong, not the code
+
+`StepUpIsBounded` initially failed, and the implementation was correct. The slab
+in it is one block wide, so standing on it is transient: the body steps up,
+walks across, and drops off the far side. Asserting on the *final* Y measured
+the wrong moment. It now tracks the peak.
+
+Worth recording because the reflex on a red test is to change the code.

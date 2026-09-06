@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, after the M7 follow-up fixes.
+Last reviewed: 2026-09-05, at the close of [M12](milestones/M12-collision-core.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -16,6 +16,7 @@ internal/
   archtest/         Architectural constraints the compiler cannot express
   blocks/           Block definitions, registry, models (full, sided, slab, orientable)
   core/             Vec3 and RGBA — the pure value types the simulation speaks
+  physics/          Collision and gravity: pure AABB resolver over a grid of boxes
   game/             Game coordinator and states
   gfx/              Scene renderer, texture atlas, chunk meshing, type conversion
   platform/         Config, logging, resource loading
@@ -84,7 +85,7 @@ The roadmap's known-defect list is empty as of M5.
 |---|---|---|
 | Terrain | Flat plane: stone/dirt/grass at y=32 | Noise, caves, biomes, structures, ores |
 | Chunk management | Fixed 3×3 grid at spawn | Streaming based on player position |
-| Physics | None — noclip flight | Collision, gravity, jumping |
+| Physics | Collision resolver exists (M12) but is not wired up; still noclip flight | Wiring it to the player (M13) |
 | Persistence | Data model supports it | No serialisation to disk |
 | Textures | Three PNGs, colour fallback otherwise | Full block texture set |
 | Blocks | 7 types | Transparency, liquids, stairs, fences, doors |
@@ -99,11 +100,12 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package (total 41.8%, floor 41.0):
+Coverage by package (total 47.3%, floor 47.0):
 
 | Package | Coverage |
 |---|---|
 | `core` | 100% |
+| `physics` | 91.3% |
 | `world/lighting` | 96.2% |
 | `gfx/mesh` | 89.2% |
 | `testutil` | 85.4% |
