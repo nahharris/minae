@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M7](milestones/M7-smooth-lighting.md).
+Last reviewed: 2026-09-05, after the M7 follow-up fixes.
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -99,12 +99,12 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package, at the close of M7 (total 41.2%, floor 41.0):
+Coverage by package (total 41.8%, floor 41.0):
 
 | Package | Coverage |
 |---|---|
 | `core` | 100% |
-| `world/lighting` | 95.8% |
+| `world/lighting` | 96.2% |
 | `gfx/mesh` | 89.2% |
 | `testutil` | 85.4% |
 | `platform/config` | 78.6% |

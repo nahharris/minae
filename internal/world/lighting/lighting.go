@@ -295,8 +295,14 @@ func (e *Engine) updateBlockLight(x, y, z int, block *blocks.Block) {
 	e.propagateAdd(blockKind)
 }
 
-// DirtyChunks returns the chunks whose light changed since the last call,
-// and clears the set.
+// DirtyChunks returns the chunks whose meshes the light changes since the last
+// call have invalidated, and clears the set.
+//
+// This is deliberately "meshes invalidated" rather than "light changed". A
+// block is lit by the cells around it, so a change on a chunk border also
+// invalidates the neighbouring chunk even though no light inside it changed —
+// see markMeshDirty. Reporting only the chunks that changed leaves walls
+// standing on seams rendering stale darkness.
 func (e *Engine) DirtyChunks() []world.ChunkCoord {
 	if len(e.dirty) == 0 {
 		return nil
@@ -406,9 +412,66 @@ func (e *Engine) setLight(kind lightKind, x, y, z int, level uint8) {
 	}
 	kind.set(e.w, x, y, z, level)
 
-	cx, _ := world.ChunkAndLocal(x)
-	cz, _ := world.ChunkAndLocal(z)
+	e.markMeshDirty(x, z)
+}
+
+// markMeshDirty records every loaded chunk whose mesh depends on the light in
+// the global column (x, z).
+//
+// That is not only the chunk containing the cell. A block's faces are lit from
+// the cells around it — since smooth lighting, from a 2x2 patch per corner, so
+// up to one step away including diagonally — which means a block just across a
+// chunk seam is lit by this cell. A change on a border therefore invalidates
+// the neighbour's mesh even though no light inside it changed.
+//
+// A solid wall standing on a seam is the case that makes this visible: light a
+// room on one side and the wall's own chunk contains no changed cell at all,
+// because every cell in it is rock sitting at 0. Marking only the changed
+// cell's chunk leaves that wall rendering its old darkness until something
+// else happens to re-mesh it.
+func (e *Engine) markMeshDirty(x, z int) {
+	cx, lx := world.ChunkAndLocal(x)
+	cz, lz := world.ChunkAndLocal(z)
+
 	e.dirty[world.ChunkCoord{X: cx, Z: cz}] = struct{}{}
+
+	dxs, nx := borderSpan(lx)
+	dzs, nz := borderSpan(lz)
+	if nx == 1 && nz == 1 {
+		// Interior cell: no other chunk renders it. This is the overwhelming
+		// majority of writes, and it costs the same single map insert as before.
+		return
+	}
+
+	for i := range nx {
+		for j := range nz {
+			dx, dz := dxs[i], dzs[j]
+			if dx == 0 && dz == 0 {
+				continue
+			}
+			if e.w.GetChunk(cx+dx, cz+dz) == nil {
+				continue
+			}
+			e.dirty[world.ChunkCoord{X: cx + dx, Z: cz + dz}] = struct{}{}
+		}
+	}
+}
+
+// borderSpan returns the chunk offsets a local coordinate can be seen from.
+// An interior coordinate is only rendered by its own chunk; the two edge
+// coordinates are also rendered by the neighbour on that side.
+//
+// It returns an array rather than a slice because it is called on every light
+// write, and a slice would allocate in the BFS inner loop.
+func borderSpan(local int) (offsets [2]int, n int) {
+	switch local {
+	case 0:
+		return [2]int{0, -1}, 2
+	case config.ChunkWidth - 1:
+		return [2]int{0, 1}, 2
+	default:
+		return [2]int{0, 0}, 1
+	}
 }
 
 // markChunksDirty marks every loaded chunk dirty. Used by RecomputeAll,
