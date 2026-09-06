@@ -7,6 +7,7 @@ import (
 	"github.com/nahharris/minae/internal/game"
 	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/platform/logging"
+	"github.com/nahharris/minae/internal/platform/logging/raylog"
 	resource "github.com/nahharris/minae/internal/platform/resources"
 	"github.com/sirupsen/logrus"
 )
@@ -19,7 +20,7 @@ func init() {
 func main() {
 	// 1. Initialize Logging
 	logging.Init(logrus.DebugLevel)
-	logging.InitRaylibLogger()
+	raylog.Init()
 	logger := logging.ForPackage("main")
 
 	// 2. Bootstrap Data Folder (Create if missing)

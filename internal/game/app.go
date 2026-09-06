@@ -128,8 +128,8 @@ func (g *Game) Update() {
 
 		result := world.ProcessBlockInteraction(
 			g.World,
-			g.Player.Camera.Position,
-			rl.Vector3Subtract(g.Player.Camera.Target, g.Player.Camera.Position), // Direction
+			render.FromVector3(g.Player.Camera.Position),
+			render.FromVector3(rl.Vector3Subtract(g.Player.Camera.Target, g.Player.Camera.Position)), // Direction
 			action,
 			inventoryBlock,
 			0, // Initial meta
@@ -180,7 +180,7 @@ func (g *Game) Draw() {
 	// Update Lighting Uniforms
 	skyColor, lightColor, ambientColor, lightDir := g.World.TimeOfDay.GetLightingState()
 
-	rl.ClearBackground(skyColor)
+	rl.ClearBackground(render.ToColor(skyColor))
 
 	g.Renderer.SetLighting(lightColor, ambientColor, lightDir)
 
