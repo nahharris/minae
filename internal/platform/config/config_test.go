@@ -6,30 +6,50 @@ import (
 	"testing"
 )
 
+// redirectHome points os.UserHomeDir at a temporary directory so tests never
+// create files in the developer's (or the CI runner's) real home directory.
+// os.UserHomeDir reads USERPROFILE on Windows and HOME elsewhere, so both are set.
+func redirectHome(t *testing.T) string {
+	t.Helper()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir after redirect: %v", err)
+	}
+	if got != home {
+		t.Fatalf("home redirect did not take effect: want %s, got %s", home, got)
+	}
+	return home
+}
+
 func TestBootstrapDataFolder_Default(t *testing.T) {
-	// Unset env var to test default
-	os.Unsetenv("MINAE_DATA_FOLDER")
+	home := redirectHome(t)
+	// An empty value is treated as unset by BootstrapDataFolder.
+	t.Setenv("MINAE_DATA_FOLDER", "")
 
 	path, err := BootstrapDataFolder()
 	if err != nil {
 		t.Fatalf("Bootstrap failed: %v", err)
 	}
 
-	home, _ := os.UserHomeDir()
 	expected := filepath.Join(home, ".minae")
 	if path != expected {
 		t.Errorf("Expected default path %s, got %s", expected, path)
 	}
 
-	// Clean up
-	// os.RemoveAll(path) // Be careful deleting home dir stuff, maybe just leave it or mock
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("Default data folder was not created: %v", err)
+	}
 }
 
 func TestBootstrapDataFolder_Env(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetDir := filepath.Join(tmpDir, "data")
-	os.Setenv("MINAE_DATA_FOLDER", targetDir)
-	defer os.Unsetenv("MINAE_DATA_FOLDER")
+	t.Setenv("MINAE_DATA_FOLDER", targetDir)
 
 	path, err := BootstrapDataFolder()
 	if err != nil {

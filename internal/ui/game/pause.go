@@ -2,7 +2,7 @@ package ui
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/nahharris/minae/internal/ui/core"
+	minui "github.com/nahharris/minae/internal/ui/core"
 )
 
 func (u *UIManager) initPauseMenu() {

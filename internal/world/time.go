@@ -171,4 +171,3 @@ func getStateFromTime(hour float32) *DayState {
 	}
 	return nightState
 }
-

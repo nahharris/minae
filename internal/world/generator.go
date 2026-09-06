@@ -22,4 +22,3 @@ func GenerateTerrain(c *Chunk) {
 		}
 	}
 }
-

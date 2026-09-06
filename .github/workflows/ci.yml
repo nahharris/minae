@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # mise refuses to read an untrusted config, and a fresh runner trusts nothing.
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+jobs:
+  build-test:
+    name: build, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-env
+
+      - name: Build
+        run: mise exec -- go build ./...
+
+      - name: Vet
+        run: mise exec -- go vet ./...
+
+      - name: Test
+        run: mise exec -- go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage floor
+        run: mise exec -- bash scripts/check-coverage.sh coverage.out .coverage-floor
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-env
+
+      # golangci-lint type-checks the packages, so it needs the same cgo
+      # headers the build does.
+      - name: Lint
+        run: mise exec -- golangci-lint run

@@ -3,8 +3,8 @@ package ui
 import (
 	"runtime"
 
-	"github.com/nahharris/minae/internal/ui/core"
 	"github.com/nahharris/minae/internal/player"
+	minui "github.com/nahharris/minae/internal/ui/core"
 	"github.com/nahharris/minae/internal/world"
 )
 

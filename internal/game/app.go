@@ -6,7 +6,7 @@ import (
 	"github.com/nahharris/minae/internal/platform/logging"
 	resources "github.com/nahharris/minae/internal/platform/resources"
 	"github.com/nahharris/minae/internal/player"
-	"github.com/nahharris/minae/internal/ui/game"
+	ui "github.com/nahharris/minae/internal/ui/game"
 	"github.com/nahharris/minae/internal/world"
 	"github.com/nahharris/minae/internal/world/lighting"
 	"github.com/sirupsen/logrus"
@@ -111,7 +111,7 @@ func (g *Game) Update() {
 		// Player has runtime state (HasTarget, TargetBlock) but interaction logic needs to run.
 		// Let's call ProcessBlockInteraction.
 
-		var action world.InteractionAction = world.ActionNone
+		action := world.ActionNone
 		if rl.IsMouseButtonPressed(rl.MouseLeftButton) {
 			action = world.ActionBreak
 		} else if rl.IsMouseButtonPressed(rl.MouseRightButton) {

@@ -22,10 +22,8 @@ func (w *World) Raycast(start, dir rl.Vector3, maxDist float32) (bool, [3]int, [
 	y := int(math.Floor(float64(start.Y)))
 	z := int(math.Floor(float64(start.Z)))
 
-	// Step direction
-	stepX := 1
-	stepY := 1
-	stepZ := 1
+	// Step direction. Assigned in every branch of the delta calculation below.
+	var stepX, stepY, stepZ int
 
 	// Ray length (t) required to traverse one unit in each dimension
 	var tDeltaX, tDeltaY, tDeltaZ float64

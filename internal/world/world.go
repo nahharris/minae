@@ -61,8 +61,8 @@ func (w *World) fillChunkDebug(c *Chunk) {
 
 // GetBlock returns the block type at the global world coordinates.
 func (w *World) GetBlock(x, y, z int) *blocks.Block {
-	chunkX, localX := worldToLocal(x)
-	chunkZ, localZ := worldToLocal(z)
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
@@ -74,8 +74,8 @@ func (w *World) GetBlock(x, y, z int) *blocks.Block {
 // GetBlockState returns the block type and per-instance metadata at the given global coordinates.
 // Returns (nil, 0) if the chunk is missing or the position is air/out of bounds.
 func (w *World) GetBlockState(x, y, z int) (*blocks.Block, uint8) {
-	chunkX, localX := worldToLocal(x)
-	chunkZ, localZ := worldToLocal(z)
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
@@ -86,8 +86,8 @@ func (w *World) GetBlockState(x, y, z int) (*blocks.Block, uint8) {
 
 // GetLight returns the light level at the global world coordinates.
 func (w *World) GetLight(x, y, z int) uint8 {
-	chunkX, localX := worldToLocal(x)
-	chunkZ, localZ := worldToLocal(z)
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
@@ -98,8 +98,8 @@ func (w *World) GetLight(x, y, z int) uint8 {
 
 // SetLight sets the light level at the global world coordinates.
 func (w *World) SetLight(x, y, z int, level uint8) {
-	chunkX, localX := worldToLocal(x)
-	chunkZ, localZ := worldToLocal(z)
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
 
 	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
 	if !exists {
@@ -126,8 +126,8 @@ func (w *World) SetBlockState(x, y, z int, b *blocks.Block, meta uint8) []ChunkC
 		return nil
 	}
 
-	chunkX, localX := worldToLocal(x)
-	chunkZ, localZ := worldToLocal(z)
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
 
 	coord := ChunkCoord{X: chunkX, Z: chunkZ}
 	chunk, exists := w.Chunks[coord]
@@ -161,9 +161,10 @@ func (w *World) SetBlockState(x, y, z int, b *blocks.Block, meta uint8) []ChunkC
 	return affected
 }
 
-// worldToLocal converts a global coordinate to chunk and local coordinates.
+// ChunkAndLocal converts a global coordinate along one axis into the chunk index
+// and the local offset within that chunk.
 // It correctly handles negative coordinates using floor division logic.
-func worldToLocal(v int) (chunk, local int) {
+func ChunkAndLocal(v int) (chunk, local int) {
 	chunk = v / config.ChunkWidth
 	local = v % config.ChunkWidth
 
