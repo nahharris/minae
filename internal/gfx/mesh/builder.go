@@ -101,7 +101,20 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 				quads = blockModel.AppendQuads(quads[:0], meta)
 				for _, q := range quads {
 					dx, dy, dz := offsetForFace(q.Face)
-					light := world.GetLight(gx+dx, gy+dy, gz+dz)
+					nx, ny, nz := gx+dx, gy+dy, gz+dz
+
+					// The light engine treats an unloaded chunk as opaque (skylight 0)
+					// so that light never leaks in from nowhere. That is correct for
+					// the engine, but at the edge of the loaded world it would render
+					// the outward-facing faces as a black wall. That is a cosmetic
+					// problem for the renderer, not the engine, so we substitute
+					// full-bright here instead of changing what the engine reports.
+					var light uint8
+					if world.HasChunkAt(nx, nz) {
+						light = world.GetSkyLight(nx, ny, nz)
+					} else {
+						light = 15
+					}
 					alpha := uint8((uint16(light) * 255) / 15)
 
 					if q.Cull {

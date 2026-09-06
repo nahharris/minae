@@ -21,6 +21,7 @@ type Game struct {
 	Player   *player.Player
 	Renderer *render.SceneRenderer
 	UI       *ui.UIManager
+	Lighting *lighting.Engine
 
 	Log *logrus.Entry
 }
@@ -34,12 +35,13 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 	w := world.NewWorld()
 	w.GenerateFixedGrid()
 
-	// Calculate initial lighting for all chunks
-	// TODO: This is expensive O(N) on start.
+	// Light the whole world once. RecomputeAll is order-independent, unlike
+	// seeding chunk by chunk, so the result does not depend on map iteration
+	// order.
 	log.Info("Calculating initial lighting...")
-	for _, chunk := range w.Chunks {
-		lighting.CalculateChunkLighting(chunk, w)
-	}
+	lightEngine := lighting.NewEngine(w)
+	lightEngine.RecomputeAll()
+	lightEngine.DirtyChunks() // Drain: every chunk is meshed for the first time below.
 
 	// Initialize Player (Runtime wrapper around World.PlayerState)
 	p := player.NewPlayer(w.PlayerState)
@@ -63,6 +65,7 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 		Player:   p,
 		Renderer: renderer,
 		UI:       u,
+		Lighting: lightEngine,
 		Log:      log,
 	}
 
@@ -141,34 +144,8 @@ func (g *Game) Update() {
 			g.Player.TargetBlock = rl.NewVector3(float32(result.TargetBlock[0]), float32(result.TargetBlock[1]), float32(result.TargetBlock[2]))
 		}
 
-		// If chunks were affected, re-light and re-mesh
-		if len(result.AffectedChunks) > 0 {
-			// Deduplicate
-			chunkSet := make(map[world.ChunkCoord]struct{}, len(result.AffectedChunks))
-			uniqueChunks := make([]world.ChunkCoord, 0, len(result.AffectedChunks))
-			for _, coord := range result.AffectedChunks {
-				if _, seen := chunkSet[coord]; seen {
-					continue
-				}
-				chunkSet[coord] = struct{}{}
-				uniqueChunks = append(uniqueChunks, coord)
-			}
-
-			// Recalculate lighting
-			for _, coord := range uniqueChunks {
-				if chunk, exists := g.World.Chunks[coord]; exists {
-					lighting.CalculateChunkLighting(chunk, g.World)
-				}
-			}
-
-			// Regenerate meshes
-			for _, coord := range uniqueChunks {
-				if chunk, exists := g.World.Chunks[coord]; exists {
-					g.Renderer.UpdateMesh(chunk, g.World)
-				} else {
-					g.Renderer.RemoveMesh(coord)
-				}
-			}
+		if result.Changed {
+			g.remeshAfterBlockChange(result)
 		}
 	}
 }
@@ -235,4 +212,37 @@ func (g *Game) Draw() {
 // Unload cleans up resources.
 func (g *Game) Unload() {
 	g.Renderer.Unload()
+}
+
+// remeshAfterBlockChange updates the lighting for a block change and rebuilds
+// every chunk mesh the change invalidated.
+//
+// Two independent sets of chunks need rebuilding, and missing either one leaves
+// stale geometry on screen:
+//
+//   - result.AffectedChunks — the chunk holding the block, plus its neighbours
+//     when the block sits on a border. Their face culling changed.
+//   - the engine's dirty set — every chunk whose skylight the change altered.
+//     Light crosses chunk seams, so this routinely includes chunks the block
+//     itself did not touch.
+func (g *Game) remeshAfterBlockChange(result world.InteractionResult) {
+	pos := result.ChangedBlock
+	g.Lighting.OnBlockChanged(pos[0], pos[1], pos[2])
+
+	stale := make(map[world.ChunkCoord]struct{}, len(result.AffectedChunks)+4)
+	for _, coord := range result.AffectedChunks {
+		stale[coord] = struct{}{}
+	}
+	for _, coord := range g.Lighting.DirtyChunks() {
+		stale[coord] = struct{}{}
+	}
+
+	for coord := range stale {
+		chunk, exists := g.World.Chunks[coord]
+		if !exists {
+			g.Renderer.RemoveMesh(coord)
+			continue
+		}
+		g.Renderer.UpdateMesh(chunk, g.World)
+	}
 }

@@ -1,6 +1,6 @@
 # M3 — Rewrite the light engine
 
-**Status:** 📋 Planned
+**Status:** ✅ Done
 **Design:** [2026-09-05 lighting and foundations](../superpowers/specs/2026-09-05-lighting-and-foundations-design.md)
 
 ## Goal
@@ -9,82 +9,145 @@ Replace `CalculateChunkLighting` with an incremental engine that is correct
 across chunk seams, can darken as well as brighten, and reports which chunks
 need re-meshing.
 
-## What is wrong today
+Note this milestone does **not** put light on screen. The engine now computes
+correct values, but the renderer still discards them — see
+[M4](M4-render-pipeline.md).
 
-`CalculateChunkLighting` is a whole-chunk recompute that only ever *adds*
-light. It wipes its own chunk's light map before reseeding from neighbour
-borders, and has no removal pass, so placing a block can never darken anything.
+## What was wrong
 
-Three defects compound it:
+`CalculateChunkLighting` was a whole-chunk recompute that only ever *added*
+light. It wiped its own chunk before reseeding from neighbour borders, had no
+removal pass, and decayed skylight downward.
 
-- `World.GetLight` returns **15** for a missing chunk. The BFS reads that as
-  "already brighter than anything I could contribute" and halts. This is the
-  reported cross-chunk propagation failure.
-- The BFS writes into neighbouring chunks through `w.SetLight` but never marks
-  them for re-meshing, so cross-seam updates stay invisible.
-- Skylight decays by one in every direction, including straight down. Real
-  skylight falls at full strength, which is what makes an open shaft bright to
-  bedrock while a cave under an overhang goes black.
-
-## Target shape
-
-```go
-type Engine struct {
-    world World                    // GetBlock, SkyLight, SetSkyLight, HasChunk
-    dirty map[ChunkCoord]struct{}  // every write records its chunk
-}
-
-func (e *Engine) SeedChunk(c ChunkCoord)      // top-down column scan
-func (e *Engine) OnBlockChanged(x, y, z int)  // incremental add + remove
-func (e *Engine) DirtyChunks() []ChunkCoord   // returns and clears
-```
+- `World.GetLight` returned **15** for a missing chunk. The BFS read that as
+  "already brighter than anything I could contribute" and halted — the reported
+  cross-chunk propagation failure.
+- The BFS wrote into neighbouring chunks but never marked them for re-meshing.
+- Skylight decayed in all six directions, so caves under overhangs were not dark.
 
 ## Steps
 
-- [ ] Rename `Chunk.LightMap` to `Chunk.SkyLight`. Do not add `BlockLight`
-      until light sources exist.
-- [ ] Fix `World.GetLight` missing-chunk semantics: unloaded chunks are opaque,
-      return 0, and are never written to. Add `HasChunk`.
-- [ ] Add the cosmetic fallback in the *mesh builder*, not the engine: a face
-      whose neighbour cell lies in an unloaded chunk samples 15, so the world
-      edge does not render as a black wall.
-- [ ] Implement `SeedChunk`: top-down column scan, full strength until the
-      first opaque block.
-- [ ] Implement propagation with the correct decay rule — full strength
-      straight down through air, minus one in the other five directions.
-- [ ] Implement the removal BFS: zero cells dimmer than the node being removed,
-      re-queue brighter ones as re-propagation sources.
-- [ ] Implement `OnBlockChanged` on top of add and remove.
-- [ ] Add dirty tracking to every write, and wire `DirtyChunks` into
-      `game/app.go` so cross-seam updates re-mesh the neighbour.
-- [ ] Delete `CalculateChunkLighting`.
-- [ ] Raise `.coverage-floor`.
+- [x] Rename `Chunk.LightMap` to `Chunk.SkyLight`, and the accessors to
+      `GetSkyLight` / `SetSkyLight`. No `BlockLight` until light sources exist.
+- [x] Fix `World.GetSkyLight`: unloaded chunks return 0, are opaque, and are
+      never written to. Added `HasChunkAt`.
+- [x] Cosmetic fallback in the *mesh builder*, not the engine: a face whose
+      neighbour cell is in an unloaded chunk samples 15, so the world edge does
+      not render as a black wall.
+- [x] Column scan, propagation with the correct decay rule, removal walk,
+      `OnBlockChanged`, automatic dirty tracking.
+- [x] Wire into `game/app.go`.
+- [x] Delete `CalculateChunkLighting`.
+- [x] Raise `.coverage-floor` from 21.5 to 29.0.
 
-## Tests
+## The engine
 
-All pure, all fast, using `internal/testutil`:
+```go
+func NewEngine(w *world.World) *Engine
+func (e *Engine) RecomputeAll()
+func (e *Engine) OnBlockChanged(x, y, z int)
+func (e *Engine) DirtyChunks() []world.ChunkCoord
+```
 
-- [ ] Flat terrain: surface is 15, one block below is 0.
-- [ ] Overhang: cells underneath decay with distance from the opening.
-- [ ] Vertical shaft: full 15 all the way down, proving downward no-decay.
-- [ ] Sealed cave: interior is 0.
-- [ ] Cross-seam: light from chunk A reaches chunk B at the correct level, and
-      symmetrically in the opposite direction.
-- [ ] Place then break a block: light returns to a state identical to a fresh
-      full recompute.
-- [ ] **Property test** — after any random sequence of block edits, the
-      incremental result is byte-identical to a full recompute from scratch.
-      This is the test that earns its keep; it covers the whole class of bugs
-      currently in the file.
-- [ ] Dirty set: every chunk whose light changed is reported, and no chunk
-      whose light did not change is reported.
+### The decay rule
+
+Skylight falls **straight down at full strength** and decays by one in every
+other direction:
+
+```
+expected(L, d) = 15      if d is straight down AND L == 15
+                 L - 1   otherwise
+```
+
+This is what makes an open shaft bright to bedrock while a cave under an
+overhang goes black. It is implemented once and used by both the add and the
+remove walk, so the two cannot drift apart.
+
+### Why removal compares against `expected`, not `nl < level`
+
+The textbook removal walk asks whether a neighbour is *dimmer* than the cell
+being removed, on the reasoning that a dimmer neighbour must have been fed by
+it. That is wrong here. Because skylight falls downward losslessly, the cell
+directly beneath a removed level-15 cell is itself 15, so `nl < level` is false
+and the textbook test classifies it as an independent light source — leaving the
+entire column lit underneath a freshly placed block.
+
+Comparing against `expected(level, d)` handles the lossless downward case. A
+cell that merely coincides with `expected` while genuinely fed by another source
+is safe: it gets zeroed, the adjacent real source lands in the re-add set, and
+re-propagation restores it.
+
+This was the predicted failure mode, and mutation testing confirmed it: swapping
+the comparison for `nl < node.Level` makes the property test fail with
+`incremental=15 full-recompute=14`.
+
+## Design decisions worth recording
+
+**`RecomputeAll`, not `SeedChunk`.** The milestone originally specified a
+per-chunk seed. That is order-dependent — seeding chunk B wipes light chunk A
+already pushed into it, and recovery depends on which chunk is seeded next,
+which in Go means map iteration order. `RecomputeAll` zeroes everything, scans
+all columns into one queue, and propagates once, so it is order-independent by
+construction. That is what makes it usable as the property test's ground truth.
+A per-chunk seed is only genuinely needed for chunk streaming, which is backlog.
+
+**Air is exactly `nil`.** `FromNumericID` short-circuits on numeric ID 0, and
+both `nil` and `blocks.Air` map to 0, so `GetBlock` can never return a block
+whose ID is `minae/air`. The old code's `ID == "minae/air" || Name == "Air"`
+branches were unreachable. Transparency is now a single named helper.
+
+**Engine correctness and edge cosmetics are separate.** The engine treats
+unloaded chunks as opaque so light never originates from nowhere. The renderer
+substitutes full-bright for faces against unloaded chunks so the world edge is
+not a black wall. Putting the cosmetic rule in the engine would have corrupted
+the propagation.
+
+**`RecomputeAll` marks every loaded chunk dirty rather than diffing.** A full
+recompute is a bulk operation where a safe over-approximation is correct and a
+precise diff buys nothing. The strict "skip unchanged writes" behaviour is
+reserved for the incremental paths, where spurious re-meshes would matter.
 
 ## Verification
+
+The hand-written cases cover flat terrain, overhang decay, vertical shafts,
+sealed caves, cross-seam propagation in both directions, unloaded neighbours,
+place-darkens and break-restores.
+
+The test that actually guards the engine is the **property test**: after every
+edit in a random sequence, the incremental result must be byte-identical to a
+full recompute. It reports the first divergent cell by both local and global
+coordinate rather than dumping two 64KB arrays.
+
+Both were checked by **mutation testing** — a test suite that has never been
+seen to fail is not evidence of anything:
+
+| Mutation | Caught by |
+|---|---|
+| Removal uses the textbook `nl < level` | property test, and `PlaceDarkens` |
+| `expected` drops the downward full-strength case | property test, `VerticalShaft`, `PlaceDarkens`, `RemoveRestores` |
+
+### Performance
+
+The lighting suite initially took 139 s under CI's `-race -covermode=atomic`.
+Two fixes brought it to 22 s:
+
+- `RecomputeAll` zeroed light with an element-by-element loop — 65,536
+  individually instrumented writes per chunk. Replaced with `clear`, which
+  compiles to a single memclr.
+- The column scan walked all 256 rows of every column even after the column was
+  closed, writing zeros over the zeros `clear` had just written. It now breaks
+  at the first opaque block.
+
+Both are real improvements to production code, not test-only tuning.
 
 ```bash
 mise run ci
 ```
 
-The property test is the real gate. If it passes over a few thousand random
-edit sequences, the engine is correct in a way that no hand-written case list
-can establish on its own.
+At the close of M3: build, vet, `go test -race`, and lint all clean. Total
+coverage 29.4%, floor raised to 29.0. `internal/world/lighting` went from 0% to
+94.2%.
+
+**Not verified:** nothing here has been seen on screen, because the renderer
+still discards the light. M4 closes that loop and carries the manual visual
+checklist.

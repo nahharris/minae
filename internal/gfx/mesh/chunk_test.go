@@ -126,6 +126,81 @@ func TestGenerateChunkMeshData_Slab_CullingDependsOnOverlap(t *testing.T) {
 	})
 }
 
+// faceAlpha returns the vertex alpha recorded for the face at the given
+// index within data.Colors, assuming a "full" cube model where AppendQuads
+// emits the six faces in the fixed order Right, Left, Top, Bottom, Front,
+// Back and every vertex of a face shares the same alpha (see addQuad in
+// builder.go).
+func faceAlpha(data *mesh.ChunkMeshData, faceIndex int) uint8 {
+	const bytesPerFace = 6 * 4 // 6 vertices, 4 color bytes each
+	return data.Colors[faceIndex*bytesPerFace+3]
+}
+
+const (
+	faceRight = iota
+	faceLeft
+)
+
+// The light engine reports 0 for a chunk it hasn't loaded, since unloaded
+// space must never look like open sky. But that correctness would render
+// the outward-facing edge of the loaded world as a black wall, so the mesh
+// builder substitutes full-bright (15) whenever a face's neighbor cell
+// falls in a chunk that isn't loaded, while still using the engine's real
+// value for faces whose neighbor is inside a loaded chunk.
+func TestGenerateChunkMeshData_UnloadedNeighborFallsBackToFullBright(t *testing.T) {
+	blocks.Reset()
+	stone := blocks.Stone
+	blocks.Register(stone)
+
+	t.Run("neighbor_chunk_unloaded_getsFullBright", func(t *testing.T) {
+		w := world.NewWorld()
+		c := world.NewChunk(0, 0)
+		w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
+
+		// Block at the +X edge of chunk (0,0): its right-face neighbor
+		// (global x=16) falls in chunk (1,0), which is never loaded.
+		c.SetBlock(15, 8, 8, stone)
+
+		data := mesh.GenerateChunkMeshData(c, w, nil)
+		if data == nil {
+			t.Fatal("expected mesh data, got nil")
+		}
+
+		if got, want := faceAlpha(data, faceRight), uint8(255); got != want {
+			t.Errorf("right face (unloaded neighbor) alpha = %d, want %d (full bright)", got, want)
+		}
+		// The left-face neighbor (global x=14) is inside the same loaded
+		// chunk and was never lit, so it keeps the engine's real value (0).
+		if got, want := faceAlpha(data, faceLeft), uint8(0); got != want {
+			t.Errorf("left face (loaded neighbor) alpha = %d, want %d (engine value)", got, want)
+		}
+	})
+
+	t.Run("neighbor_chunk_loaded_usesEngineValue", func(t *testing.T) {
+		w := world.NewWorld()
+		c := world.NewChunk(0, 0)
+		w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
+
+		// Now also load the neighbor chunk and give the boundary cell a
+		// known skylight value via the engine's own storage.
+		neighbor := world.NewChunk(1, 0)
+		neighbor.SetSkyLight(0, 8, 8, 9)
+		w.Chunks[world.ChunkCoord{X: 1, Z: 0}] = neighbor
+
+		c.SetBlock(15, 8, 8, stone)
+
+		data := mesh.GenerateChunkMeshData(c, w, nil)
+		if data == nil {
+			t.Fatal("expected mesh data, got nil")
+		}
+
+		want := uint8((uint16(9) * 255) / 15)
+		if got := faceAlpha(data, faceRight); got != want {
+			t.Errorf("right face (loaded neighbor) alpha = %d, want %d (engine value for skylight 9)", got, want)
+		}
+	})
+}
+
 type dummyUVLookup struct {
 	uv atlas.UV
 }
