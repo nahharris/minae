@@ -7,7 +7,8 @@ same commit that implements them.
 The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
-The lighting backlog is finished: M1-M7 are complete and M8 was deliberately skipped.
+The lighting backlog is finished (M1-M7 done, M8 skipped). Next up is player
+physics: M12 and M13.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -19,6 +20,8 @@ The lighting backlog is finished: M1-M7 are complete and M8 was deliberately ski
 | [M6](milestones/M6-block-light.md) | Block light sources | ✅ Done | Glowstone emits; one BFS parameterized over two light channels |
 | [M7](milestones/M7-smooth-lighting.md) | Smooth lighting and ambient occlusion | ✅ Done | Per-vertex light sampling and corner darkening |
 | [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | ⏭️ Skipped | Declined: reintroduces the bug class M4 fixed, for an effect nobody asked to see |
+| [M12](milestones/M12-collision-core.md) | Collision and gravity core | 📋 Planned | Pure, GPU-free AABB resolver: gravity, jump, 0.6 step-up |
+| [M13](milestones/M13-player-controller.md) | Player controller | 📋 Planned | Give the player a body; walking by default, flight as a toggle |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done · ⏭️ Skipped
 
@@ -36,7 +39,8 @@ Not scheduled, and deliberately excluded from M1–M4. Roughly in the order that
 would make the game most playable soonest.
 
 **Gameplay foundations**
-- Player collision and gravity (currently noclip flight)
+- Player collision and gravity: planned as [M12](milestones/M12-collision-core.md)
+  and [M13](milestones/M13-player-controller.md).
 - Noise-based terrain generation (currently a flat plane at y=32)
 - Infinite world: chunk streaming based on player position (currently a fixed 3×3 grid)
 - World persistence: save and load chunks, player state and time to disk
