@@ -21,26 +21,8 @@ jobs:
     name: build, vet, test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      # raylib-go is cgo and links against OpenGL, X11 and ALSA. These are
-      # needed to compile, not to run: no test opens a window.
-      - name: Install raylib build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev xorg-dev libasound2-dev
-
-      # mise.toml is the project's single source of truth for tool versions.
-      - uses: jdx/mise-action@v2
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-env
 
       - name: Build
         run: mise exec -- go build ./...
@@ -58,24 +40,10 @@ jobs:
     name: golangci-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-env
 
-      # golangci-lint type-checks the packages, so it needs the cgo headers too.
-      - name: Install raylib build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev xorg-dev libasound2-dev
-
-      - uses: jdx/mise-action@v2
-
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
-
+      # golangci-lint type-checks the packages, so it needs the same cgo
+      # headers the build does.
       - name: Lint
         run: mise exec -- golangci-lint run

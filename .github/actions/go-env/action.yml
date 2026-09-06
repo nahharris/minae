@@ -1,0 +1,33 @@
+name: Set up Go build environment
+description: >
+  Installs raylib's native build dependencies, the mise-managed toolchain, and
+  the Go module and build caches. Shared by every job so the two cannot drift.
+
+runs:
+  using: composite
+  steps:
+    # raylib-go is cgo. It vendors GLFW and compiles both the X11 and the
+    # Wayland backends, so the Wayland headers are required even though nothing
+    # in CI ever opens a window. xorg-dev pulls in libxi, libxcursor, libxrandr
+    # and libxinerama; libasound2-dev is for raudio.
+    - name: Install raylib build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libgl1-mesa-dev \
+          xorg-dev \
+          libwayland-dev \
+          libxkbcommon-dev \
+          libasound2-dev
+
+    # mise.toml is the project's single source of truth for tool versions.
+    - uses: jdx/mise-action@v4
+
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: ${{ runner.os }}-go-
