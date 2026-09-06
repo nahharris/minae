@@ -9,14 +9,25 @@ import (
 
 // Raycast performs a 3D DDA raycast to find the first block hit.
 // start: The starting position of the ray.
-// dir: The direction vector of the ray (should be normalized).
-// maxDist: The maximum distance to check.
+// dir: The direction vector of the ray. It need not be unit length: Raycast
+// normalizes it internally, so maxDist is always measured in world units
+// regardless of dir's magnitude. A zero-length dir has no direction to
+// travel in, so the ray reports no hit.
+// maxDist: The maximum distance to check, in world units.
 // Returns:
 // - hit: true if a block was hit
 // - pos: The global coordinates of the hit block [x, y, z]
 // - face: The normal of the face that was hit [x, y, z] (e.g., [0, 1, 0] for top)
 // - block: The block that was hit
 func (w *World) Raycast(start, dir core.Vec3, maxDist float32) (bool, [3]int, [3]int, *blocks.Block) {
+	dir = dir.Normalize()
+	if dir == (core.Vec3{}) {
+		// No direction to travel in. A ray with no direction cannot reach any
+		// block, including the one start happens to sit inside, so this is
+		// not treated as an immediate hit.
+		return false, [3]int{}, [3]int{}, nil
+	}
+
 	// Initial voxel coordinates
 	x := int(math.Floor(float64(start.X)))
 	y := int(math.Floor(float64(start.Y)))
@@ -31,8 +42,21 @@ func (w *World) Raycast(start, dir core.Vec3, maxDist float32) (bool, [3]int, [3
 	// Ray length (t) to reach the next voxel boundary
 	var tMaxX, tMaxY, tMaxZ float64
 
-	// Calculate steps and deltas
-	if dir.X < 0 {
+	// Calculate steps and deltas. A component of exactly zero is handled
+	// before the sign check: +0.0 and -0.0 both compare equal to 0, but
+	// -0.0 fails "< 0" (it is not less than zero), so without this explicit
+	// branch a -0.0 component would fall into the positive branch below and
+	// divide by a negative-signed zero, producing -Inf for tDelta/tMax. A
+	// -Inf tMax is smaller than every other axis on every iteration, so that
+	// axis would be chosen forever and the loop would never terminate.
+	// Routing exact zero to +Inf here, regardless of its sign, means that
+	// axis is simply never chosen - which is correct for a ray that does not
+	// move along it.
+	if dir.X == 0 {
+		stepX = 0
+		tDeltaX = math.Inf(1)
+		tMaxX = math.Inf(1)
+	} else if dir.X < 0 {
 		stepX = -1
 		tDeltaX = -1.0 / float64(dir.X)
 		tMaxX = (float64(x) - float64(start.X)) / float64(dir.X)
@@ -42,7 +66,11 @@ func (w *World) Raycast(start, dir core.Vec3, maxDist float32) (bool, [3]int, [3
 		tMaxX = (float64(x) + 1.0 - float64(start.X)) / float64(dir.X)
 	}
 
-	if dir.Y < 0 {
+	if dir.Y == 0 {
+		stepY = 0
+		tDeltaY = math.Inf(1)
+		tMaxY = math.Inf(1)
+	} else if dir.Y < 0 {
 		stepY = -1
 		tDeltaY = -1.0 / float64(dir.Y)
 		tMaxY = (float64(y) - float64(start.Y)) / float64(dir.Y)
@@ -52,7 +80,11 @@ func (w *World) Raycast(start, dir core.Vec3, maxDist float32) (bool, [3]int, [3
 		tMaxY = (float64(y) + 1.0 - float64(start.Y)) / float64(dir.Y)
 	}
 
-	if dir.Z < 0 {
+	if dir.Z == 0 {
+		stepZ = 0
+		tDeltaZ = math.Inf(1)
+		tMaxZ = math.Inf(1)
+	} else if dir.Z < 0 {
 		stepZ = -1
 		tDeltaZ = -1.0 / float64(dir.Z)
 		tMaxZ = (float64(z) - float64(start.Z)) / float64(dir.Z)
