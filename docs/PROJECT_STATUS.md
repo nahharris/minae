@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M4](milestones/M4-render-pipeline.md).
+Last reviewed: 2026-09-05, at the close of [M5](milestones/M5-known-defects.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -58,7 +58,7 @@ alpha, so dark blocks render dark instead of see-through; per-face bias replaced
 a directional sun that never pointed downward; and the day cycle ring is
 circular, so colour eases rather than snapping.
 
-For defects found but deliberately not fixed, see the roadmap.
+The roadmap's known-defect list is empty as of M5.
 
 ## Working
 
@@ -99,7 +99,7 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package, at the close of M4 (total 31.6%, floor 31.0):
+Coverage by package, at the close of M5 (total 35.5%, floor 35.0):
 
 | Package | Coverage |
 |---|---|
@@ -110,7 +110,7 @@ Coverage by package, at the close of M4 (total 31.6%, floor 31.0):
 | `platform/config` | 78.6% |
 | `blocks` | 58.7% |
 | `ui/core` | 37.5% |
-| `world` | 20.1% |
+| `world` | 50.2% |
 | `blocks/model`, `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/logging/raylog`, `platform/resources`, `player`, `ui/game` | 0% |
 
 (`archtest` reports no statements; it contains tests only.)
