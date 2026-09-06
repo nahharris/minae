@@ -4,18 +4,17 @@ An index of milestones. Each links to its own document holding the goal, the
 ordered steps, and how the milestone is verified. Steps are checked off in the
 same commit that implements them.
 
-Current focus: making the project verifiable, then fixing the lighting engine.
-The design behind milestones 1–4 is
+The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
-All four milestones are code-complete. M4 awaits visual sign-off — the shader is the one thing no test can judge.
+All four milestones are complete and visually signed off. What comes next is in the backlog below.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
 | [M1](milestones/M1-foundations.md) | Verifiable foundations | ✅ Done | CI, lint config, coverage ratchet, test harness, docs structure |
 | [M2](milestones/M2-core-purity.md) | Purify the core | ✅ Done | Remove raylib from the simulation layer so lighting is testable without a GPU |
 | [M3](milestones/M3-light-engine.md) | Rewrite the light engine | ✅ Done | Incremental skylight with removal, correct cross-chunk propagation, dirty tracking |
-| [M4](milestones/M4-render-pipeline.md) | Get light onto the screen | 🚧 Awaiting visual sign-off | Vertex-packed light, face bias, `skyTint` day cycle |
+| [M4](milestones/M4-render-pipeline.md) | Get light onto the screen | ✅ Done | Vertex-packed light, face bias, `skyTint` day cycle |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done
 
