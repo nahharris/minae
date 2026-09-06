@@ -7,7 +7,7 @@ same commit that implements them.
 The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
-All milestones are complete and the known-defect list is empty. What comes next is in the backlog below.
+M1-M6 are complete. M7 and M8 finish the lighting backlog; M8 is optional.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -16,6 +16,9 @@ All milestones are complete and the known-defect list is empty. What comes next 
 | [M3](milestones/M3-light-engine.md) | Rewrite the light engine | ✅ Done | Incremental skylight with removal, correct cross-chunk propagation, dirty tracking |
 | [M4](milestones/M4-render-pipeline.md) | Get light onto the screen | ✅ Done | Vertex-packed light, face bias, `skyTint` day cycle |
 | [M5](milestones/M5-known-defects.md) | Clear the known-defect list | ✅ Done | Fixed a raycast freeze on negative-zero directions; normalized `dir` so `maxDist` is in world units |
+| [M6](milestones/M6-block-light.md) | Block light sources | ✅ Done | Glowstone emits; one BFS parameterized over two light channels |
+| [M7](milestones/M7-smooth-lighting.md) | Smooth lighting and ambient occlusion | 📋 Planned | Per-vertex light sampling and corner darkening |
+| [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | 📋 Planned | Optional polish; previously declined |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done
 
@@ -38,12 +41,12 @@ would make the game most playable soonest.
 - Infinite world: chunk streaming based on player position (currently a fixed 3×3 grid)
 - World persistence: save and load chunks, player state and time to disk
 
-**Lighting, once M3 and M4 land**
-- Block light sources: torches, glowstone. The vertex `G` channel and the
-  `blockTint` uniform are already reserved for this.
-- Ambient occlusion. The vertex `B` channel is reserved for it.
-- Smooth lighting: per-vertex rather than per-face light sampling
-- A gentle directional sun tint layered over the baked light
+**Lighting**
+- Block light sources: done in [M6](milestones/M6-block-light.md). A torch with a
+  proper thin cross-shaped model is still outstanding; glowstone is a full cube.
+- Ambient occlusion and smooth lighting: scheduled as [M7](milestones/M7-smooth-lighting.md).
+- A gentle directional sun tint: scheduled as [M8](milestones/M8-sun-tint.md), and
+  optional -- it was declined in the original design.
 
 **Rendering performance**
 - Frustum culling

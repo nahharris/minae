@@ -46,9 +46,16 @@ func TestIncrementalMatchesFullRecompute(t *testing.T) {
 			for i := range editsPerSeed {
 				x, y, z := randomEditPos(rng)
 
+				// Air, plain stone, and an emitter. Without glowstone in the mix
+				// the block-light channel is never exercised and comparing it
+				// proves nothing. Emitters are weighted equally so sequences
+				// routinely place one, bury it, and dig it back out.
 				var placed *blocks.Block
-				if rng.Intn(2) == 0 {
+				switch rng.Intn(3) {
+				case 0:
 					placed = blocks.Stone
+				case 1:
+					placed = blocks.Glowstone
 				}
 				w.SetBlock(x, y, z, placed)
 				engine.OnBlockChanged(x, y, z)
@@ -203,20 +210,32 @@ func randomEditPos(rng *rand.Rand) (x, y, z int) {
 		propMinBlock + rng.Intn(span)
 }
 
-// lightState is a copy of one chunk's skylight array.
-type lightState = [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
+// lightArray is one chunk-sized light channel.
+type lightArray = [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
+
+// lightState is a copy of both of one chunk's light channels.
+//
+// Both are captured deliberately. Skylight and block light propagate through
+// the same parameterized BFS, so a change that fixes one channel while breaking
+// the other is exactly the failure this test exists to catch — and it would go
+// unnoticed if only skylight were compared.
+type lightState struct {
+	sky   lightArray
+	block lightArray
+}
 
 func snapshot(w *world.World) map[world.ChunkCoord]lightState {
 	out := make(map[world.ChunkCoord]lightState, len(w.Chunks))
 	for coord, chunk := range w.Chunks {
-		out[coord] = chunk.SkyLight
+		out[coord] = lightState{sky: chunk.SkyLight, block: chunk.BlockLight}
 	}
 	return out
 }
 
 // firstDifference returns a human-readable description of the first cell where
-// the two snapshots disagree, or "" if they are identical. It reports a single
-// cell with its coordinates rather than dumping two 64KB arrays.
+// the two snapshots disagree, or "" if they are identical. It names the channel
+// and reports a single cell with its coordinates, rather than dumping two 64KB
+// arrays.
 func firstDifference(got, want map[world.ChunkCoord]lightState) string {
 	if len(got) != len(want) {
 		return fmt.Sprintf("chunk count differs: got %d, want %d", len(got), len(want))
@@ -227,22 +246,33 @@ func firstDifference(got, want map[world.ChunkCoord]lightState) string {
 		if !ok {
 			return fmt.Sprintf("chunk %+v missing from result", coord)
 		}
-		if gotLight == wantLight {
+
+		if diff := firstChannelDifference(coord, "skylight", gotLight.sky, wantLight.sky); diff != "" {
+			return diff
+		}
+		if diff := firstChannelDifference(coord, "block light", gotLight.block, wantLight.block); diff != "" {
+			return diff
+		}
+	}
+	return ""
+}
+
+func firstChannelDifference(coord world.ChunkCoord, channel string, got, want lightArray) string {
+	if got == want {
+		return ""
+	}
+
+	for i := range want {
+		if got[i] == want[i] {
 			continue
 		}
-
-		for i := range wantLight {
-			if gotLight[i] == wantLight[i] {
-				continue
-			}
-			lx, y, lz := unindex(i)
-			return fmt.Sprintf(
-				"chunk %+v local (%d,%d,%d) global (%d,%d,%d): incremental=%d full-recompute=%d",
-				coord, lx, y, lz,
-				coord.X*config.ChunkWidth+lx, y, coord.Z*config.ChunkWidth+lz,
-				gotLight[i], wantLight[i],
-			)
-		}
+		lx, y, lz := unindex(i)
+		return fmt.Sprintf(
+			"chunk %+v %s at local (%d,%d,%d) global (%d,%d,%d): incremental=%d full-recompute=%d",
+			coord, channel, lx, y, lz,
+			coord.X*config.ChunkWidth+lx, y, coord.Z*config.ChunkWidth+lz,
+			got[i], want[i],
+		)
 	}
 	return ""
 }

@@ -34,12 +34,13 @@ var (
 			},
 		},
 	})
-	Wood = Register(&Block{ID: "minae/wood", Name: "Wood", Color: 0x8B4513FF})
+	Wood      = Register(&Block{ID: "minae/wood", Name: "Wood", Color: 0x8B4513FF})
+	Glowstone = Register(&Block{ID: "minae/glowstone", Name: "Glowstone", Color: 0xFFD98CFF, LightLevel: 15})
 )
 
 // vanillaBlocks returns every built-in block, in registration order.
 func vanillaBlocks() []*Block {
-	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood}
+	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood, Glowstone}
 }
 
 // ResetToVanilla clears the registry and re-registers the built-in blocks.

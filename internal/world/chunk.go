@@ -8,10 +8,11 @@ import (
 // Chunk represents a 16x16x256 section of the world.
 // It stores block data in a flat array for cache locality.
 type Chunk struct {
-	Blocks   [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]blocks.NumID
-	Meta     [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
-	SkyLight [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
-	X, Z     int // Chunk coordinates in the world grid (not world position)
+	Blocks     [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]blocks.NumID
+	Meta       [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
+	SkyLight   [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
+	BlockLight [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
+	X, Z       int // Chunk coordinates in the world grid (not world position)
 }
 
 // NewChunk creates a new Chunk at the specified grid coordinates.
@@ -141,6 +142,29 @@ func (c *Chunk) SetSkyLight(x, y, z int, level uint8) bool {
 	}
 	index := c.getBlockIndex(x, y, z)
 	c.SkyLight[index] = level
+	return true
+}
+
+// GetBlockLight returns the block light level at the specified local coordinates.
+// x, z: 0 to 15
+// y: 0 to 255
+// Returns 0 if coordinates are out of bounds.
+func (c *Chunk) GetBlockLight(x, y, z int) uint8 {
+	if !c.InBounds(x, y, z) {
+		return 0
+	}
+	index := c.getBlockIndex(x, y, z)
+	return c.BlockLight[index]
+}
+
+// SetBlockLight sets the block light level at the specified local coordinates.
+// Returns true if successful, false if coordinates are out of bounds.
+func (c *Chunk) SetBlockLight(x, y, z int, level uint8) bool {
+	if !c.InBounds(x, y, z) {
+		return false
+	}
+	index := c.getBlockIndex(x, y, z)
+	c.BlockLight[index] = level
 	return true
 }
 

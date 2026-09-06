@@ -49,7 +49,7 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 	builder := meshBuilderPool.Get().(*meshBuilder)
 	builder.reset()
 
-	addQuad := func(x, y, z int, q model.Quad, skylight uint8, uv atlas.UV) {
+	addQuad := func(x, y, z int, q model.Quad, skylight, blockLight uint8, uv atlas.UV) {
 		fx, fy, fz := float32(x), float32(y), float32(z)
 
 		n := normalForFace(q.Face)
@@ -66,17 +66,19 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 
 		// Vertex colour packs per-vertex lighting inputs instead of true colour:
 		// R = skylight (0..15 mapped onto 0..255, exactly light*17), G = block
-		// light (reserved for torches, always 0 for now), B = ambient occlusion
-		// (reserved, unimplemented, so fully unoccluded), A = opacity, always
-		// fully opaque. Alpha is deliberately never used to carry light: raylib
-		// blends by default, so a dark-but-alpha'd vertex used to render as
-		// see-through sky instead of dark. Per-face brightness (e.g. top
-		// brighter than sides) is applied in the shader, not baked in here, so
-		// it stays tunable without re-meshing.
+		// light (0..15 mapped onto 0..255, exactly light*17, for glowstone and
+		// other emitters), B = ambient occlusion (reserved, unimplemented, so
+		// fully unoccluded), A = opacity, always fully opaque. Alpha is
+		// deliberately never used to carry light: raylib blends by default, so
+		// a dark-but-alpha'd vertex used to render as see-through sky instead
+		// of dark. Per-face brightness (e.g. top brighter than sides) is
+		// applied in the shader, not baked in here, so it stays tunable
+		// without re-meshing.
 		skylightColor := skylight * 17
+		blockLightColor := blockLight * 17
 		for range 6 {
 			builder.normals = append(builder.normals, n.X, n.Y, n.Z)
-			builder.colors = append(builder.colors, skylightColor, 0, 255, 255)
+			builder.colors = append(builder.colors, skylightColor, blockLightColor, 255, 255)
 		}
 
 		u1, v1 := uvForVertex(q.Face, p1, uv)
@@ -118,9 +120,15 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 					// the outward-facing faces as a black wall. That is a cosmetic
 					// problem for the renderer, not the engine, so we substitute
 					// full-bright here instead of changing what the engine reports.
-					var light uint8
+					//
+					// Block light gets no such fallback: there is no reason to pretend
+					// an unloaded chunk contains a torch, so it stays 0 whenever the
+					// neighbor chunk isn't loaded. The asymmetry with skylight above is
+					// intentional, not an oversight.
+					var light, blockLight uint8
 					if world.HasChunkAt(nx, nz) {
 						light = world.GetSkyLight(nx, ny, nz)
+						blockLight = world.GetBlockLight(nx, ny, nz)
 					} else {
 						light = 15
 					}
@@ -146,7 +154,7 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 						}
 					}
 
-					addQuad(x, y, z, q, light, uv)
+					addQuad(x, y, z, q, light, blockLight, uv)
 				}
 			}
 		}

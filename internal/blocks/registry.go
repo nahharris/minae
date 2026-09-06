@@ -8,8 +8,17 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nahharris/minae/internal/platform/logging"
 	"gopkg.in/yaml.v3"
 )
+
+// maxLightLevel is the highest light level a block may emit.
+const maxLightLevel uint8 = 15
+
+// log is the logger for the blocks package. internal/platform/logging is
+// itself required to stay free of raylib (see internal/archtest), so
+// depending on it here does not compromise the simulation layer's purity.
+var log = logging.ForPackage("blocks")
 
 // Registry manages all loaded block definitions.
 type Registry struct {
@@ -68,13 +77,26 @@ func Register(b *Block) *Block {
 		return nil
 	}
 
+	if b.LightLevel > maxLightLevel {
+		log.Warnf("block %q declares light_level %d, clamping to %d", b.ID, b.LightLevel, maxLightLevel)
+		b.LightLevel = maxLightLevel
+	}
+
 	b.ensureModel()
 
 	if existing, ok := globalRegistry.blocks[b.ID]; ok {
-		existing.Name = b.Name
-		existing.Color = b.Color
-		existing.ModelSpec = b.ModelSpec
-		existing.Model = b.Model
+		// Overwrite in place so existing *Block pointers stay valid, copying
+		// the whole struct rather than field by field. Enumerating fields here
+		// means every future one has to be remembered, and forgetting a field
+		// does not fail loudly: the definition reloads and that property
+		// silently keeps its old value. LightLevel was already missed once.
+		//
+		// numericID is the sole exception. It is assigned by the registry, not
+		// by the definition, and the incoming block has not been allocated one.
+		id := existing.numericID
+		*existing = *b
+		existing.numericID = id
+
 		existing.ensureModel()
 		return existing
 	}
