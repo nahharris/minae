@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/internal/blocks"
 	"github.com/nahharris/minae/internal/blocks/model"
 	"github.com/nahharris/minae/internal/gfx/atlas"
 	"github.com/nahharris/minae/internal/platform/config"
@@ -218,14 +219,14 @@ func offsetForFace(face model.Face) (dx, dy, dz int) {
 }
 
 // aoRamp maps an ambient-occlusion level (0 = most occluded corner, 3 =
-// fully unoccluded) onto the mesh's B channel. The levels sit at 0.4, 0.6,
-// 0.8 and 1.0 of full brightness; tune these four values freely if the AO
+// fully unoccluded) onto the mesh's B channel. The levels sit at 0.6, 0.73,
+// 0.87 and 1.0 of full brightness; tune these four values freely if the AO
 // contrast needs adjusting, including non-linearly.
 //
 // Nothing else depends on their spacing, and that is deliberate: the
 // triangulation flip compares raw occlusion levels rather than these bytes,
 // so an uneven ramp cannot quietly change which diagonal a quad splits along.
-var aoRamp = [4]uint8{102, 153, 204, 255}
+var aoRamp = [4]uint8{153, 187, 221, 255}
 
 // cellSample holds the per-cell state the smooth-lighting and ambient-
 // occlusion sampling needs: the two light channels and whether the cell lets
@@ -234,6 +235,10 @@ var aoRamp = [4]uint8{102, 153, 204, 255}
 type cellSample struct {
 	sky, block  uint8
 	transparent bool
+
+	// occludes is deliberately separate from transparent: an emitting block is
+	// solid (light does not pass through it) but casts no ambient occlusion.
+	occludes bool
 }
 
 // sampleCell reads the light and solidity of one global cell for the
@@ -253,13 +258,28 @@ type cellSample struct {
 func sampleCell(world WorldReader, x, y, z int) cellSample {
 	block, _ := world.GetBlockState(x, y, z)
 	if !world.HasChunkAt(x, z) {
-		return cellSample{sky: 15, block: 0, transparent: block == nil}
+		return cellSample{sky: 15, block: 0, transparent: block == nil, occludes: false}
 	}
 	return cellSample{
 		sky:         world.GetSkyLight(x, y, z),
 		block:       world.GetBlockLight(x, y, z),
 		transparent: block == nil,
+		occludes:    occludes(block),
 	}
+}
+
+// occludes reports whether a block casts ambient occlusion on its neighbours.
+//
+// This is deliberately not the same question as transparency. Ambient
+// occlusion approximates how much surrounding geometry blocks incoming light,
+// so a light-emitting block is excluded: a glowstone is not blocking light, it
+// is light. Letting one occlude produces a dark halo on exactly the surfaces it
+// is illuminating, which reads as the lamp casting its own shadow.
+//
+// Transparency still governs which cells contribute to the smooth-lighting
+// average, and an emitter is solid there — light does not pass through it.
+func occludes(b *blocks.Block) bool {
+	return b != nil && b.LightLevel == 0
 }
 
 // faceAxes returns the two local-space axis indices (0=X, 1=Y, 2=Z) tangent
@@ -398,9 +418,9 @@ func cornerLightAndAO(world WorldReader, gx, gy, gz int, face model.Face, corner
 	skylightByte = averageChannel(a, b, c, d, func(s cellSample) uint8 { return s.sky })
 	blockLightByte = averageChannel(a, b, c, d, func(s cellSample) uint8 { return s.block })
 
-	side1Solid := !b.transparent
-	side2Solid := !c.transparent
-	cornerSolid := !d.transparent
+	side1Solid := b.occludes
+	side2Solid := c.occludes
+	cornerSolid := d.occludes
 
 	level := 3 - boolToInt(side1Solid) - boolToInt(side2Solid) - boolToInt(cornerSolid)
 	if side1Solid && side2Solid {

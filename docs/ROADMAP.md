@@ -49,6 +49,9 @@ would make the game most playable soonest.
 - Banding on large untextured surfaces is inherent to per-vertex lighting at
   one-block resolution; see the note at the end of [M7](milestones/M7-smooth-lighting.md).
   Dithering in the fragment shader would hide most of it. Not scheduled.
+- AO strength is tunable in two places: `aoRamp` in the mesh builder (contrast)
+  and `blockAOStrength` in the fragment shader (how much AO applies to torch
+  light). Both are worth revisiting once real textures exist.
 
 **Rendering performance**
 - Frustum culling

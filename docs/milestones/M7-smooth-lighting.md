@@ -206,3 +206,52 @@ implementation; textured blocks hide most of it.
 Options, none scheduled: dither in the fragment shader (cheap, hides 8-bit
 quantisation), or sample light at sub-block resolution (expensive, and a much
 larger change).
+
+## Follow-up: AO tuning against light sources and tight spaces
+
+Two artifacts reported from screenshots after the flip fix. Both came from the
+same place: ambient occlusion was being applied indiscriminately.
+
+**A glowstone cast an occlusion shadow.** AO's notion of "solid" was simply "not
+air", so an emitting block occluded like any other. The result was a dark halo
+on precisely the surfaces the glowstone was illuminating — the lamp casting its
+own shadow.
+
+Fixed by separating two questions that had been conflated in one boolean:
+
+- `transparent` — does light pass through this cell? Governs which cells join
+  the smooth-lighting average. An emitter is **not** transparent; it is solid.
+- `occludes` — does this cell cast ambient occlusion? An emitter does **not**.
+  AO approximates how much surrounding geometry blocks incoming light, and a
+  glowstone is not blocking light, it is light.
+
+**A 2×2 pocket drew a bright cross on the floor.** Not a bug in the AO rule but
+the standard rule behaving badly in enclosed space. A 2×2 floor is four quads
+meeting at one shared centre corner. That centre touches no wall and is fully
+unoccluded; every outer corner touches two walls, which the
+`side1 && side2 → 0` rule forces to the darkest level. Four quads bright only at
+the room's centre reads as a cross.
+
+Two changes, per Hannah's call:
+
+- AO now applies **in full to skylight and at half strength to block light**
+  (`blockAOStrength` in the fragment shader). AO models occlusion of the distant
+  sky, which is what skylight is; a torch one block away is not blocked by the
+  same geometry in the same way. Removing AO from block light entirely would
+  have erased the artifact but flattened every torch-lit cave, so it is halved
+  rather than dropped.
+- The ramp softened from `0.4 → 1.0` to `0.6 → 1.0`. With flat untextured
+  colours the original contrast read as heavy. Worth revisiting once real
+  textures land, in either direction.
+
+### Tests
+
+`TestAO_EmittingBlocksDoNotOcclude` carries a control subtest asserting that a
+*stone* diagonal neighbour still occludes exactly one corner. Without it, the
+emitter case would pass just as happily if AO stopped working altogether.
+
+Two tests hard-coded ramp bytes (`102`, `204`) and broke when the contrast
+changed. They now read `AORampForTest()` by level, so tuning the ramp no longer
+requires editing tests — which is the point, since a test that must be edited
+every time a tunable value is tuned trains you to edit tests without reading
+them.

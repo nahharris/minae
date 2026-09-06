@@ -22,6 +22,12 @@ uniform vec3 blockTint;
 // playability floor, not a physical term.
 uniform float minAmbient;
 
+// blockAOStrength is how much of the ambient-occlusion darkening applies to
+// block light. 1.0 treats a torch exactly like skylight; 0.0 exempts it
+// entirely. Half keeps some corner depth in torch-lit spaces without the
+// hard cross a 2x2 pocket produces at full strength.
+const float blockAOStrength = 0.5;
+
 // Per-face brightness. Voxel faces are axis-aligned, so a constant step per
 // orientation is what gives the world its sense of depth. This replaces the
 // old N-dot-L term, which produced no light on top faces at any hour because
@@ -49,8 +55,23 @@ void main()
     float block = fragColor.g;
     float ao    = fragColor.b;
 
-    vec3 light = max(skyTint * sky, blockTint * block);
-    light *= faceBias(normalize(fragNormal)) * ao;
+    // Ambient occlusion applies in full to skylight and at reduced strength to
+    // block light.
+    //
+    // AO approximates how much of the distant sky a corner can see, which is
+    // exactly what skylight is. A torch a block away is not occluded by the
+    // same geometry in the same way, and applying full AO to it makes small
+    // enclosed spaces read badly: in a 2x2 pocket every corner touches two
+    // walls and is forced to the darkest level, leaving only the shared centre
+    // bright and drawing a hard cross across the floor.
+    //
+    // Dropping AO from block light entirely would remove that artifact but
+    // also flatten every torch-lit cave, so it is halved rather than removed.
+    vec3 litBySky   = skyTint * sky * ao;
+    vec3 litByBlock = blockTint * block * mix(1.0, ao, blockAOStrength);
+
+    vec3 light = max(litBySky, litByBlock);
+    light *= faceBias(normalize(fragNormal));
     light = max(light, vec3(minAmbient));
 
     finalColor = vec4(texelColor.rgb * light, texelColor.a * fragColor.a);
