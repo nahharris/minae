@@ -418,12 +418,31 @@ func cornerLightAndAO(world WorldReader, gx, gy, gz int, face model.Face, corner
 	skylightByte = averageChannel(a, b, c, d, func(s cellSample) uint8 { return s.sky })
 	blockLightByte = averageChannel(a, b, c, d, func(s cellSample) uint8 { return s.block })
 
-	side1Solid := b.occludes
-	side2Solid := c.occludes
-	cornerSolid := d.occludes
+	// Occlusion is asked of the block's shape at the corner, not of the cell's
+	// occupancy. The probe point is the shared corner nudged a quarter cell into
+	// each neighbour, so a slab only shades the half of its cell it actually
+	// fills.
+	vx := float32(gx) + corner.X
+	vy := float32(gy) + corner.Y
+	vz := float32(gz) + corner.Z
+
+	var scratch []model.Box
+	probe := func(dx, dy, dz int) bool {
+		return occludesCorner(world,
+			gx+dx, gy+dy, gz+dz,
+			vx+cornerProbe*float32(dx), vy+cornerProbe*float32(dy), vz+cornerProbe*float32(dz),
+			&scratch)
+	}
+
+	side1Solid := probe(nx+ux, ny+uy, nz+uz)
+	side2Solid := probe(nx+wx, ny+wy, nz+wz)
+	cornerSolid := probe(nx+ux+wx, ny+uy+wy, nz+uz+wz)
 
 	level := 3 - boolToInt(side1Solid) - boolToInt(side2Solid) - boolToInt(cornerSolid)
 	if side1Solid && side2Solid {
+		// Where two neighbours meet along an edge, the diagonal cell touches
+		// this vertex at a single point and contributes no solid angle, so the
+		// corner is fully occluded whatever the diagonal holds.
 		level = 0
 	}
 
@@ -509,4 +528,48 @@ func uvForVertex(face model.Face, v model.Vec3, r atlas.UV) (u, vt float32) {
 	u = r.U0 + (r.U1-r.U0)*localU
 	vt = r.V0 + (r.V1-r.V0)*localV
 	return u, vt
+}
+
+// cornerProbe is how far into a neighbouring cell the occlusion test samples,
+// measured from the shared corner.
+//
+// A quarter of a cell resolves half-block shapes unambiguously: probing from a
+// corner on a cell's lower face lands at 0.25, inside a bottom slab and clear
+// of a top one, and probing from the upper face lands at 0.75, the reverse.
+// Shapes with features finer than a half cell — stairs at quarter steps, say —
+// would need a finer probe or genuine area sampling, and this constant is where
+// that would be revisited.
+const cornerProbe = 0.25
+
+// occludesCorner reports whether the block at the given cell has solid geometry
+// at the given point, expressed in world space.
+//
+// This asks about the block's *shape*, not merely whether the cell is occupied.
+// A slab fills half its cell, so whether it occludes depends on which half the
+// corner sits against: a top slab beside a floor does not shade that floor,
+// because the two never touch. Testing occupancy alone made every slab cast a
+// full block's worth of occlusion.
+//
+// A light-emitting block never occludes: it is not blocking light, it is light.
+func occludesCorner(world WorldReader, cx, cy, cz int, px, py, pz float32, scratch *[]model.Box) bool {
+	block, meta := world.GetBlockState(cx, cy, cz)
+	if block == nil || block.LightLevel > 0 {
+		return false
+	}
+
+	blockModel := block.Model
+	if blockModel == nil {
+		blockModel = model.CompileModel(block.ID, block.ModelSpec)
+	}
+	*scratch = blockModel.CollisionBoxes((*scratch)[:0], meta)
+
+	lx, ly, lz := px-float32(cx), py-float32(cy), pz-float32(cz)
+	for _, b := range *scratch {
+		if lx >= b.Min.X && lx <= b.Max.X &&
+			ly >= b.Min.Y && ly <= b.Max.Y &&
+			lz >= b.Min.Z && lz <= b.Max.Z {
+			return true
+		}
+	}
+	return false
 }

@@ -255,3 +255,68 @@ changed. They now read `AORampForTest()` by level, so tuning the ramp no longer
 requires editing tests — which is the point, since a test that must be edited
 every time a tunable value is tuned trains you to edit tests without reading
 them.
+
+## Follow-up: ambient occlusion ignored block shape
+
+Reported from screenshots: occlusion above and below a slab looked wrong.
+
+`occludes` was a per-block boolean — "is this cell occupied by a non-emitting
+block". A slab fills half its cell, so a half-height block cast exactly as much
+occlusion as a full cube, in whichever direction you looked at it.
+
+Measured before the fix, a floor's top face with a slab beside it:
+
+| neighbour | before | correct |
+|---|---|---|
+| bottom slab beside a floor | shaded | shaded — it fills the half against the floor |
+| **top slab beside a floor** | **shaded** | **not shaded — half a cell away** |
+| **bottom slab beside a ceiling** | **shaded** | **not shaded — half a cell away** |
+| top slab beside a ceiling | shaded | shaded |
+
+Occlusion now asks the block's *shape*, not the cell's occupancy: the shared
+corner is probed a quarter cell into each neighbour, and the neighbour's
+collision boxes are tested for that point. A quarter cell resolves half-block
+shapes unambiguously — probing from a cell's lower face lands at 0.25, inside a
+bottom slab and clear of a top one. Shapes with features finer than a half cell
+would need a finer probe or genuine area sampling; `cornerProbe` is where that
+would be revisited.
+
+This reuses the collision boxes added for the player, so a block's shape is
+described once and both physics and lighting read the same description. Stairs
+will get correct occlusion for free.
+
+### The other report: corners much darker than the edge between them
+
+Investigated and **not changed**, because it is correct.
+
+At an inside corner the level goes 3 → 2 → 0, skipping 1. That is the
+`side1 && side2 → 0` rule, and it is right: where two neighbours meet along an
+edge, the diagonal cell touches the vertex at a single *point* and so
+contributes no solid angle. The corner genuinely is fully occluded, whether or
+not the diagonal is filled — which the scenario matrix now asserts both ways.
+
+What makes it conspicuous is that the jump is two ramp steps wide at exactly the
+place the eye is drawn to, on untextured flat colour. That is a contrast
+question, and `aoRamp` is the knob: widening the ramp softens every step
+including this one. Left alone pending real textures.
+
+### A scenario matrix
+
+`ao_scenarios_test.go` covers twelve corner and edge configurations — open
+faces, single edges, diagonals, inside corners with the diagonal both open and
+filled, a corridor, all four slab-against-face orientations, a slab against a
+wall, and an emitter.
+
+It asserts AO **levels**, not colour bytes. Levels are what the geometry
+determines; the bytes are a contrast setting documented as tunable, and
+asserting those would make all twelve fail the next time the ramp moves, for a
+reason having nothing to do with corners.
+
+It also locates the face by matching the emitted normal and checking the
+vertices lie inside the block under test, rather than by index arithmetic —
+face indices shift whenever a neighbour sorts earlier in the chunk's scan
+order, which several of these scenarios do.
+
+Mutation-tested: reverting occlusion to the shape-blind boolean fails the three
+slab scenarios and nothing else, which is exactly the blast radius it should
+have.
