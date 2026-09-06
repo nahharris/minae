@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M12](milestones/M12-collision-core.md).
+Last reviewed: 2026-09-05, at the close of [M13](milestones/M13-player-controller.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -70,8 +70,9 @@ The roadmap's known-defect list is empty as of M5.
   negative-coordinate handling; 3D DDA raycasting for block targeting.
 - **Rendering** — face-culled mesh generation, runtime texture atlas with UV
   mapping, chunk mesh upload and cleanup.
-- **Player** — first-person camera with pitch clamping, WASD + Space/Ctrl
-  movement, scroll-selected hotbar.
+- **Player** — a 0.6x1.8 body under gravity with jumping and a 0.6 step-up;
+  the camera is derived from the body at eye height. Flight toggles on F3.
+  First-person look with pitch clamping, scroll-selected hotbar.
 - **Interaction** — break and place, with slab orientation from the clicked
   face and 4-way facing from view direction.
 - **UI** — custom panel/stack layout framework; crosshair, hotbar, pause menu,
@@ -85,7 +86,7 @@ The roadmap's known-defect list is empty as of M5.
 |---|---|---|
 | Terrain | Flat plane: stone/dirt/grass at y=32 | Noise, caves, biomes, structures, ores |
 | Chunk management | Fixed 3×3 grid at spawn | Streaming based on player position |
-| Physics | Collision resolver exists (M12) but is not wired up; still noclip flight | Wiring it to the player (M13) |
+| Physics | Walking under gravity, jumping, 0.6 step-up; flight on F3 | Sprinting, crouching, fall damage |
 | Persistence | Data model supports it | No serialisation to disk |
 | Textures | Three PNGs, colour fallback otherwise | Full block texture set |
 | Blocks | 7 types | Transparency, liquids, stairs, fences, doors |
@@ -100,25 +101,29 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package (total 47.3%, floor 47.0):
+Coverage by package (total 53.8%, floor 53.0):
 
 | Package | Coverage |
 |---|---|
 | `core` | 100% |
-| `physics` | 91.3% |
 | `world/lighting` | 96.2% |
+| `physics` | 91.3% |
 | `gfx/mesh` | 89.2% |
 | `testutil` | 85.4% |
 | `platform/config` | 78.6% |
+| `world` | 74.5% |
 | `blocks` | 68.9% |
+| `player` | 57.5% |
 | `ui/core` | 37.5% |
-| `world` | 53.8% |
-| `blocks/model`, `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/logging/raylog`, `platform/resources`, `player`, `ui/game` | 0% |
+| `blocks/model` | 12.5% |
+| `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/logging/raylog`, `platform/resources`, `ui/game` | 0% |
 
 (`archtest` reports no statements; it contains tests only.)
 
-The remaining gaps are all raylib-facing packages that need a GPU to exercise.
-`internal/game` at 0% is the most worthwhile of them to attack next.
+Most remaining gaps are raylib-facing packages that need a GPU to exercise.
+`internal/game` at 0% is the most worthwhile of those. `internal/blocks/model` at
+12.5% is the outlier: it is pure and testable, and only its collision shapes have
+tests -- the quad generation and occlusion logic have none.
 
 ## Dependencies
 

@@ -20,7 +20,8 @@ type GameConfig struct {
 	ScreenHeight     int     `yaml:"screen_height"`
 	TargetFPS        int     `yaml:"target_fps"`
 	FOV              float32 `yaml:"fov"`
-	PlayerSpeed      float32 `yaml:"player_speed"`
+	WalkSpeed        float32 `yaml:"walk_speed"`
+	FlySpeed         float32 `yaml:"fly_speed"`
 	MouseSens        float32 `yaml:"mouse_sens"`
 	PlayerArmLength  float32 `yaml:"player_arm_length"`
 	DayCycleDuration float32 `yaml:"day_cycle_duration"`
@@ -33,7 +34,8 @@ func DefaultConfig() GameConfig {
 		ScreenHeight:     720,
 		TargetFPS:        60,
 		FOV:              60.0,
-		PlayerSpeed:      10.0,
+		WalkSpeed:        4.5,
+		FlySpeed:         10.0,
 		MouseSens:        0.003,
 		PlayerArmLength:  5.0,
 		DayCycleDuration: 600.0,

@@ -29,3 +29,8 @@ func (m *FullBlock) Occludes(_ uint8, _ Face, _ Rect) bool {
 func (m *FullBlock) Textures() []string {
 	return uniqueStrings(m.tex[:])
 }
+
+// CollisionBoxes appends the single unit box that fills the voxel.
+func (m *FullBlock) CollisionBoxes(dst []Box, _ uint8) []Box {
+	return append(dst, Box{Min: Vec3{0, 0, 0}, Max: Vec3{1, 1, 1}})
+}

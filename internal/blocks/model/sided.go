@@ -42,3 +42,10 @@ func (m *SidedBlock) Occludes(_ uint8, _ Face, _ Rect) bool {
 func (m *SidedBlock) Textures() []string {
 	return uniqueStrings([]string{m.top, m.bottom, m.side})
 }
+
+// CollisionBoxes appends the single unit box that fills the voxel. A
+// SidedBlock is a full cube with different textures per face, not a
+// different shape, so its collision box is identical to FullBlock's.
+func (m *SidedBlock) CollisionBoxes(dst []Box, _ uint8) []Box {
+	return append(dst, Box{Min: Vec3{0, 0, 0}, Max: Vec3{1, 1, 1}})
+}

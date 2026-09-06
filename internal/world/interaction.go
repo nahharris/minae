@@ -6,6 +6,7 @@ import (
 	"github.com/nahharris/minae/internal/blocks"
 	"github.com/nahharris/minae/internal/blocks/model"
 	"github.com/nahharris/minae/internal/core"
+	"github.com/nahharris/minae/internal/physics"
 	"github.com/nahharris/minae/internal/platform/config"
 )
 
@@ -37,10 +38,29 @@ func raycastTarget(w *World, cameraPos, cameraDir core.Vec3) (hit bool, pos [3]i
 	return
 }
 
-func placingInsidePlayer(cameraPos core.Vec3, placePos [3]int) bool {
-	return int(math.Floor(float64(cameraPos.X))) == placePos[0] &&
-		int(math.Floor(float64(cameraPos.Y))) == placePos[1] &&
-		int(math.Floor(float64(cameraPos.Z))) == placePos[2]
+// placingInsidePlayer reports whether the block cell at placePos overlaps the
+// player's body box. It is an overlap test rather than a single-cell equality
+// check because the body spans multiple vertical cells (feet, head, and
+// anything between), and a check against only one of them would let a block
+// be placed inside another. Boxes that only touch at a shared face do not
+// overlap, matching internal/physics's own definition of overlap.
+func placingInsidePlayer(playerBox physics.AABB, placePos [3]int) bool {
+	fx, fy, fz := float32(placePos[0]), float32(placePos[1]), float32(placePos[2])
+	blockBox := physics.AABB{
+		Min: core.Vec3{X: fx, Y: fy, Z: fz},
+		Max: core.Vec3{X: fx + 1, Y: fy + 1, Z: fz + 1},
+	}
+	return boxesOverlap(playerBox, blockBox)
+}
+
+// boxesOverlap reports whether a and b intersect with positive volume. Boxes
+// that only touch at a shared face do not overlap. This mirrors the overlap
+// test internal/physics uses internally, kept here rather than exported from
+// physics so that package's surface stays focused on the resolver.
+func boxesOverlap(a, b physics.AABB) bool {
+	return a.Min.X < b.Max.X && a.Max.X > b.Min.X &&
+		a.Min.Y < b.Max.Y && a.Max.Y > b.Min.Y &&
+		a.Min.Z < b.Max.Z && a.Max.Z > b.Min.Z
 }
 
 func applySlabMeta(base uint8, block *blocks.Block, face [3]int) uint8 {
@@ -89,9 +109,15 @@ func applyOrientableMeta(base uint8, block *blocks.Block, viewDir core.Vec3) uin
 }
 
 // ProcessBlockInteraction handles block breaking and placing logic.
+//
+// cameraPos and cameraDir originate at the eye, not the feet: the targeting
+// ray must still come from where the player is looking. playerBox is the
+// player's body box, used only to keep a placement from landing inside the
+// player -- a separate concern from where the ray starts.
 func ProcessBlockInteraction(
 	w *World,
 	cameraPos, cameraDir core.Vec3,
+	playerBox physics.AABB,
 	action InteractionAction,
 	blockToPlace *blocks.Block,
 	placeMeta uint8,
@@ -123,9 +149,8 @@ func ProcessBlockInteraction(
 		// Place block
 		placePos := [3]int{pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]}
 
-		// Don't place inside the player
-		// We use a simple integer check here. Ideally we should use AABB check with player collider.
-		if placingInsidePlayer(cameraPos, placePos) {
+		// Don't place inside the player.
+		if placingInsidePlayer(playerBox, placePos) {
 			return result
 		}
 

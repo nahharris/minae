@@ -107,7 +107,7 @@ func (g *Game) Update() {
 		g.World.TimeOfDay.Update(dt)
 
 		// Update Player
-		g.Player.Update(dt)
+		g.Player.Update(dt, g.World)
 
 		// Handle Block Interaction
 		// We moved interaction logic to world/interaction.go, but we need to call it.
@@ -133,6 +133,7 @@ func (g *Game) Update() {
 			g.World,
 			render.FromVector3(g.Player.Camera.Position),
 			render.FromVector3(rl.Vector3Subtract(g.Player.Camera.Target, g.Player.Camera.Position)), // Direction
+			g.Player.Body.Box(),
 			action,
 			inventoryBlock,
 			0, // Initial meta

@@ -1,6 +1,6 @@
 # M13 — Player controller
 
-**Status:** 📋 Planned
+**Status:** ✅ Done — pending visual confirmation
 **Depends on:** [M12](M12-collision-core.md)
 
 ## Objective
@@ -113,3 +113,53 @@ Automated tests cover the body; only eyes can judge the feel.
 
 Sprinting, crouching, fall damage, health, swimming, and any general entity
 system. The player is the only body here.
+
+## Result
+
+`internal/player` went from 0% to 57.5% coverage and `internal/world` from 53.8%
+to 74.5%; total 53.8%.
+
+That jump in `internal/player` is the point of the restructure rather than a
+side effect. The package was previously untestable — every path ran through
+`rl.IsKeyDown` and a live camera. Pulling intent construction, camera derivation
+and mode switching out into functions that touch no raylib made the logic
+reachable, and the raylib-only remainder is now mouse-look and key polling.
+
+### Ownership
+
+`Player.Body` is the sole source of truth. The camera is derived through one
+function, called once per frame immediately after `physics.Step`, and nothing
+else assigns `Camera.Position`. `PlayerState.Position` now stores the body's feet
+rather than the eye.
+
+The fly toggle is F3 (F1, F2 and Escape were taken).
+
+### Verification of the placement fix
+
+`placingInsidePlayer` now overlaps the placement block against the player's box.
+The test asserts the feet cell, the cell between, and the head cell
+**individually** — reverting to the old single-cell check fails all three. A test
+that only covered the feet would have passed against the buggy version, which is
+exactly the trap the criterion was written to avoid.
+
+### A feel question that turned out fine
+
+The implementer's controller-level "jump clears a one-block step" test raises
+walk speed to 10, on the grounds that clearing a one-block-*wide* step needs
+enough horizontal speed to cross it inside the jump arc. That is true, but it
+left open whether the real default of 4.5 can climb onto terrain at all — the
+most basic action in the game.
+
+Checked directly against a raised plateau: 3.0, 4.5 and 6.0 all climb it
+comfortably. Landing on a single isolated one-block-wide pillar is the harder
+case and genuinely wants more speed, but ordinary terrain is fine at the default.
+No tuning needed.
+
+## Manual verification
+
+The checklist above is unticked on purpose: it is the procedure to re-run
+whenever the movement constants change, not a record of a past sign-off.
+
+The constants most likely to want tuning are `walk_speed` and `fly_speed` in
+`config.yaml`, and `JumpVelocity`, `Gravity` and `StepHeight` in
+`physics.DefaultConfig`.

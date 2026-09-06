@@ -78,3 +78,13 @@ func (m *SlabBlock) Occludes(meta uint8, face Face, region Rect) bool {
 func (m *SlabBlock) Textures() []string {
 	return uniqueStrings(m.tex[:])
 }
+
+// CollisionBoxes appends the half-height box the slab occupies: the bottom
+// half (y=0..0.5), or the top half (y=0.5..1) when MetaSlabTopBit is set,
+// mirroring the same bit test AppendQuads and Occludes already use.
+func (m *SlabBlock) CollisionBoxes(dst []Box, meta uint8) []Box {
+	if meta&MetaSlabTopBit != 0 {
+		return append(dst, Box{Min: Vec3{0, 0.5, 0}, Max: Vec3{1, 1, 1}})
+	}
+	return append(dst, Box{Min: Vec3{0, 0, 0}, Max: Vec3{1, 0.5, 1}})
+}
