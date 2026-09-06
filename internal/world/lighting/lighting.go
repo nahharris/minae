@@ -1,8 +1,10 @@
+// Package lighting computes and incrementally maintains chunk skylight.
 package lighting
 
 import (
 	_ "embed"
 
+	"github.com/nahharris/minae/internal/blocks"
 	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/world"
 )
@@ -13,162 +15,275 @@ var VsCode string
 //go:embed shaders/fragment.glsl
 var FsCode string
 
-// LightNode represents a position in the BFS queue
-type LightNode struct {
+// MaxSkyLight is the brightest possible skylight level: direct, unobstructed
+// sky.
+const MaxSkyLight uint8 = 15
+
+// lightNode is a queued position and the light level it was enqueued at.
+type lightNode struct {
 	X, Y, Z int
 	Level   uint8
 }
 
-var directions = [][3]int{
+// direction is one of the six axis-aligned neighbour offsets.
+type direction struct {
+	DX, DY, DZ int
+}
+
+var directions = [6]direction{
 	{1, 0, 0}, {-1, 0, 0},
 	{0, 1, 0}, {0, -1, 0},
 	{0, 0, 1}, {0, 0, -1},
 }
 
-// CalculateChunkLighting calculates the static skylight propagation for a single chunk.
-// Note: For a full infinite world, this needs to handle cross-chunk propagation more robustly (e.g., lighting updates).
-// But for generation, this works if we generate neighbors or handle boundaries.
-func CalculateChunkLighting(chunk *world.Chunk, w *world.World) {
-	// Queue for BFS. Pre-allocate capacity based on chunk dimensions to reduce reallocations.
-	queue := make([]LightNode, 0, config.ChunkWidth*config.ChunkWidth*config.ChunkHeight+4*config.ChunkWidth)
+// isDown reports whether d points straight down.
+func (d direction) isDown() bool {
+	return d.DX == 0 && d.DY == -1 && d.DZ == 0
+}
 
-	// 1. Initialize Skylight
-	// Go top-down. Sunlight hits the first solid block.
-	// Anything above the first solid block gets 15.
-	// The first solid block and below get 0 (initially).
-	for x := range config.ChunkWidth {
-		for z := range config.ChunkWidth {
-			// Start from top
-			lightLevel := uint8(15)
-			for y := config.ChunkHeight - 1; y >= 0; y-- {
-				block := chunk.GetBlock(x, y, z)
+// isTransparent reports whether a block lets skylight pass through it. Air
+// always reads back as nil from World.GetBlock and Chunk.GetBlock, so this is
+// the one place to extend when translucent blocks such as glass or leaves are
+// added.
+func isTransparent(b *blocks.Block) bool {
+	return b == nil
+}
 
-				// Determine if block is transparent (can pass light)
-				// For now, nil or "Air" is transparent. Leaves/Glass could be too.
-				isTransparent := block == nil || block.ID == "minae/air" || block.Name == "Air"
+// expected returns the skylight level a neighbour reached by moving from a
+// cell at level from in direction d should hold. Skylight falls straight
+// down at full strength; it decays by one in every other direction,
+// including diagonally-adjacent-but-still-vertical cases, since d is always
+// one of the six axis directions.
+func expected(from uint8, d direction) uint8 {
+	if d.isDown() && from == MaxSkyLight {
+		return MaxSkyLight
+	}
+	if from == 0 {
+		return 0
+	}
+	return from - 1
+}
 
-				if isTransparent {
-					// If we are still in direct sunlight
-					if lightLevel == 15 {
-						chunk.SetLight(x, y, z, 15)
-						// Add to queue to propagate sideways
-						// Convert to Global coordinates for the queue to handle world boundaries if we expand
-						// But here we are working locally on the chunk mostly, but we need world context for neighbors.
-						// Let's use Global Coordinates in the queue to be safe and consistent.
-						globalX := chunk.X*config.ChunkWidth + x
-						globalZ := chunk.Z*config.ChunkWidth + z
-						queue = append(queue, LightNode{globalX, y, globalZ, 15})
-					} else {
-						// Not direct sunlight (under overhang), set to 0 initially
-						chunk.SetLight(x, y, z, 0)
+// Engine incrementally maintains the skylight of every loaded chunk in a
+// World. Create one with NewEngine.
+type Engine struct {
+	w *world.World
+
+	addQueue    []lightNode
+	removeQueue []lightNode
+	reAdd       []lightNode
+
+	dirty map[world.ChunkCoord]struct{}
+}
+
+// NewEngine returns an engine that lights w.
+func NewEngine(w *world.World) *Engine {
+	return &Engine{
+		w:     w,
+		dirty: make(map[world.ChunkCoord]struct{}),
+	}
+}
+
+// RecomputeAll rebuilds the skylight of every loaded chunk from scratch. It
+// is order-independent: every loaded chunk is zeroed first, then a single
+// top-down column scan runs over every chunk collecting into one queue, and
+// only then does that queue propagate. Seeding and propagating chunk by
+// chunk would make the result depend on map iteration order.
+func (e *Engine) RecomputeAll() {
+	for _, chunk := range e.w.Chunks {
+		// clear compiles to a single memclr. The equivalent element-by-element
+		// loop is 65536 separate writes per chunk, which the race detector and
+		// the coverage counters both instrument individually — enough to
+		// dominate the test suite's runtime.
+		clear(chunk.SkyLight[:])
+	}
+
+	e.addQueue = e.addQueue[:0]
+
+	for _, chunk := range e.w.Chunks {
+		baseX := chunk.X * config.ChunkWidth
+		baseZ := chunk.Z * config.ChunkWidth
+
+		for lx := range config.ChunkWidth {
+			for lz := range config.ChunkWidth {
+				x := baseX + lx
+				z := baseZ + lz
+
+				// Walk down only as far as the first opaque block. Everything
+				// below it is shaded, and the clear above already left it at 0,
+				// so continuing would write zeros over zeros for the rest of a
+				// 256-tall column.
+				for y := config.ChunkHeight - 1; y >= 0; y-- {
+					if !isTransparent(chunk.GetBlock(lx, y, lz)) {
+						break
 					}
-				} else {
-					// Solid block stops direct sunlight
-					lightLevel = 0
-					chunk.SetLight(x, y, z, 0)
+					chunk.SetSkyLight(lx, y, lz, MaxSkyLight)
+					e.addQueue = append(e.addQueue, lightNode{x, y, z, MaxSkyLight})
 				}
 			}
 		}
 	}
 
-	// 2. Seed BFS queue with light from neighboring chunk borders
-	// This ensures cross-chunk light propagation is preserved during incremental updates
-	neighborOffsets := [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}
-	for _, offset := range neighborOffsets {
-		neighborChunk := w.GetChunk(chunk.X+offset[0], chunk.Z+offset[1])
-		if neighborChunk == nil {
+	e.markChunksDirty()
+	e.propagateAdd()
+}
+
+// OnBlockChanged updates the lighting after the block at the given global
+// coordinates changed. Callers are expected to have already written the new
+// block into the world before calling this.
+func (e *Engine) OnBlockChanged(x, y, z int) {
+	block := e.w.GetBlock(x, y, z)
+
+	if !isTransparent(block) {
+		old := e.w.GetSkyLight(x, y, z)
+		if old == 0 {
+			return
+		}
+		e.removeQueue = e.removeQueue[:0]
+		e.reAdd = e.reAdd[:0]
+		e.setSkyLight(x, y, z, 0)
+		e.removeQueue = append(e.removeQueue, lightNode{x, y, z, old})
+		e.runRemove()
+		return
+	}
+
+	e.addQueue = e.addQueue[:0]
+
+	if y == config.ChunkHeight-1 {
+		e.setSkyLight(x, y, z, MaxSkyLight)
+		e.addQueue = append(e.addQueue, lightNode{x, y, z, MaxSkyLight})
+	}
+
+	for _, d := range directions {
+		nx, ny, nz := x+d.DX, y+d.DY, z+d.DZ
+		if ny < 0 || ny >= config.ChunkHeight {
 			continue
 		}
-
-		// Determine which border of the neighbor to read from
-		var borderX, borderZ int
-		var iterX, iterZ bool
-
-		if offset[0] == -1 { // Neighbor to the left, read its right border (x=15)
-			borderX = config.ChunkWidth - 1
-			iterZ = true
-		} else if offset[0] == 1 { // Neighbor to the right, read its left border (x=0)
-			borderX = 0
-			iterZ = true
-		} else if offset[1] == -1 { // Neighbor behind, read its front border (z=15)
-			borderZ = config.ChunkWidth - 1
-			iterX = true
-		} else if offset[1] == 1 { // Neighbor in front, read its back border (z=0)
-			borderZ = 0
-			iterX = true
-		}
-
-		// Iterate along the border and seed queue with light sources
-		for y := range config.ChunkHeight {
-			if iterX {
-				for x := range config.ChunkWidth {
-					lightLevel := neighborChunk.GetLight(x, y, borderZ)
-					if lightLevel > 0 {
-						globalX := neighborChunk.X*config.ChunkWidth + x
-						globalZ := neighborChunk.Z*config.ChunkWidth + borderZ
-						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
-					}
-				}
-			} else if iterZ {
-				for z := range config.ChunkWidth {
-					lightLevel := neighborChunk.GetLight(borderX, y, z)
-					if lightLevel > 0 {
-						globalX := neighborChunk.X*config.ChunkWidth + borderX
-						globalZ := neighborChunk.Z*config.ChunkWidth + z
-						queue = append(queue, LightNode{globalX, y, globalZ, lightLevel})
-					}
-				}
-			}
+		level := e.w.GetSkyLight(nx, ny, nz)
+		if level > 0 {
+			e.addQueue = append(e.addQueue, lightNode{nx, ny, nz, level})
 		}
 	}
 
-	head := 0
-	for head < len(queue) {
-		node := queue[head]
-		head++
+	e.propagateAdd()
+}
 
-		// If light level is 1 or 0, it cannot propagate further (0 would become -1)
-		if node.Level <= 1 {
+// DirtyChunks returns the chunks whose skylight changed since the last call,
+// and clears the set.
+func (e *Engine) DirtyChunks() []world.ChunkCoord {
+	if len(e.dirty) == 0 {
+		return nil
+	}
+	out := make([]world.ChunkCoord, 0, len(e.dirty))
+	for c := range e.dirty {
+		out = append(out, c)
+		delete(e.dirty, c)
+	}
+	return out
+}
+
+// propagateAdd drains e.addQueue, propagating light outward from every
+// queued cell according to expected.
+func (e *Engine) propagateAdd() {
+	for head := 0; head < len(e.addQueue); head++ {
+		node := e.addQueue[head]
+		if node.Level == 0 {
 			continue
 		}
 
-		for _, dir := range directions {
-			nx, ny, nz := node.X+dir[0], node.Y+dir[1], node.Z+dir[2]
-
-			// Check Bounds (Y axis only, X/Z are infinite/world-based)
+		for _, d := range directions {
+			nx, ny, nz := node.X+d.DX, node.Y+d.DY, node.Z+d.DZ
 			if ny < 0 || ny >= config.ChunkHeight {
 				continue
 			}
-
-			// Get Neighbor Block
-			// Use World.GetBlock to handle chunk boundaries seamlessly
-			neighborBlock := w.GetBlock(nx, ny, nz)
-
-			// If neighbor is solid, it blocks light.
-			isTransparent := neighborBlock == nil || neighborBlock.ID == "minae/air" || neighborBlock.Name == "Air"
-			if !isTransparent {
+			if !e.w.HasChunkAt(nx, nz) {
 				continue
 			}
 
-			// Get current light level of neighbor
-			currentLevel := w.GetLight(nx, ny, nz)
+			want := expected(node.Level, d)
+			if want <= e.w.GetSkyLight(nx, ny, nz) {
+				continue
+			}
+			if !isTransparent(e.w.GetBlock(nx, ny, nz)) {
+				continue
+			}
 
-			// Propagate if new level is brighter
-			// Decrease by 1
-			newLevel := node.Level - 1
+			e.setSkyLight(nx, ny, nz, want)
+			e.addQueue = append(e.addQueue, lightNode{nx, ny, nz, want})
+		}
+	}
+	e.addQueue = e.addQueue[:0]
+}
 
-			// Special Case: Downwards propagation for skylight?
-			// In Minecraft, skylight propagates at full strength downwards through air.
-			// But we handled the "Direct Sunlight" in Step 1.
-			// Here we are propagating *dispersed* light (e.g. into caves).
-			// Wait, if we have a hole in the ceiling, Step 1 fills the column with 15.
-			// Then BFS propagates from that column into the cave.
-			// So standard -1 decay is correct for "dispersed" light.
+// runRemove drains e.removeQueue, darkening cells that were lit solely by
+// the light being removed, then re-propagates from every cell found to have
+// an independent source (e.reAdd).
+func (e *Engine) runRemove() {
+	for head := 0; head < len(e.removeQueue); head++ {
+		node := e.removeQueue[head]
 
-			if newLevel > currentLevel {
-				w.SetLight(nx, ny, nz, newLevel)
-				queue = append(queue, LightNode{nx, ny, nz, newLevel})
+		for _, d := range directions {
+			nx, ny, nz := node.X+d.DX, node.Y+d.DY, node.Z+d.DZ
+			if ny < 0 || ny >= config.ChunkHeight {
+				continue
+			}
+			if !e.w.HasChunkAt(nx, nz) {
+				continue
+			}
+			if !isTransparent(e.w.GetBlock(nx, ny, nz)) {
+				continue
+			}
+
+			nl := e.w.GetSkyLight(nx, ny, nz)
+			if nl == 0 {
+				continue
+			}
+
+			// The textbook removal test is nl < level: a neighbour dimmer
+			// than the level we are erasing was necessarily lit by us, so
+			// it also gets erased. That test is wrong here because
+			// skylight falls straight down losslessly: the cell directly
+			// beneath a removed level-15 source is itself 15, so nl < level
+			// is false there, and the textbook test would wrongly treat it
+			// as an independent source, leaving the whole column lit under
+			// a freshly placed block. Comparing against expected(level, d)
+			// instead correctly recognizes that the cell below was lit BY
+			// this one even though it holds the same level.
+			if nl == expected(node.Level, d) {
+				e.setSkyLight(nx, ny, nz, 0)
+				e.removeQueue = append(e.removeQueue, lightNode{nx, ny, nz, nl})
+			} else {
+				e.reAdd = append(e.reAdd, lightNode{nx, ny, nz, nl})
 			}
 		}
+	}
+
+	e.addQueue = e.addQueue[:0]
+	e.addQueue = append(e.addQueue, e.reAdd...)
+	e.propagateAdd()
+}
+
+// setSkyLight routes every skylight write through one place: it is a no-op
+// if the chunk is not loaded or the value is unchanged, and otherwise writes
+// the new level and records the owning chunk as dirty.
+func (e *Engine) setSkyLight(x, y, z int, level uint8) {
+	if !e.w.HasChunkAt(x, z) {
+		return
+	}
+	if e.w.GetSkyLight(x, y, z) == level {
+		return
+	}
+	e.w.SetSkyLight(x, y, z, level)
+
+	cx, _ := world.ChunkAndLocal(x)
+	cz, _ := world.ChunkAndLocal(z)
+	e.dirty[world.ChunkCoord{X: cx, Z: cz}] = struct{}{}
+}
+
+// markChunksDirty marks every loaded chunk dirty. Used by RecomputeAll,
+// which rewrites every loaded chunk's skylight.
+func (e *Engine) markChunksDirty() {
+	for coord := range e.w.Chunks {
+		e.dirty[coord] = struct{}{}
 	}
 }

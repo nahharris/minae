@@ -23,6 +23,13 @@ type InteractionResult struct {
 	AffectedChunks []ChunkCoord
 	TargetBlock    [3]int
 	HasTarget      bool
+
+	// ChangedBlock is the position whose block actually changed, which is not
+	// the same as TargetBlock: breaking changes the targeted block, placing
+	// changes the empty cell next to it. The lighting engine needs the position
+	// that changed, so it cannot use TargetBlock.
+	ChangedBlock [3]int
+	Changed      bool
 }
 
 func raycastTarget(w *World, cameraPos, cameraDir core.Vec3) (hit bool, pos [3]int, face [3]int) {
@@ -107,6 +114,8 @@ func ProcessBlockInteraction(
 	if action == ActionBreak {
 		// Break block
 		result.AffectedChunks = w.SetBlock(pos[0], pos[1], pos[2], blocks.Air)
+		result.ChangedBlock = pos
+		result.Changed = len(result.AffectedChunks) > 0
 		return result
 	}
 
@@ -125,6 +134,8 @@ func ProcessBlockInteraction(
 		meta = applyOrientableMeta(meta, blockToPlace, cameraDir)
 
 		result.AffectedChunks = w.SetBlockState(placePos[0], placePos[1], placePos[2], blockToPlace, meta)
+		result.ChangedBlock = placePos
+		result.Changed = len(result.AffectedChunks) > 0
 		return result
 	}
 
