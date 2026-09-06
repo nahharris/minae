@@ -95,19 +95,25 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 			aoLevels[i] = level
 		}
 
-		// Default triangulation is (V1,V2,V3),(V1,V3,V4). When AO is
-		// asymmetric across that diagonal, flip to (V1,V2,V4),(V2,V3,V4) so
-		// the crease runs along the diagonal that actually has the AO
-		// discontinuity.
+		// Default triangulation is (V1,V2,V3),(V1,V3,V4), splitting along the
+		// V1-V3 diagonal. Flip to (V1,V2,V4),(V2,V3,V4) — the V2-V4 diagonal —
+		// when that is the darker of the two.
+		//
+		// The quad must split along the diagonal through its *darker* corners.
+		// Light is interpolated across each triangle independently, so a split
+		// along the brighter diagonal can leave one triangle with every corner
+		// unoccluded. That triangle then renders at full brightness right up to
+		// the edge it shares with the shaded half: a hard bright wedge where a
+		// soft corner shadow belongs. Splitting through the occluded corner
+		// puts it in both triangles instead, and the shadow radiates from it.
 		//
 		// This compares raw occlusion levels, not the ramped B-channel bytes.
 		// The two agree only while aoRamp is evenly spaced, and aoRamp is
 		// explicitly documented as free to tune — including non-linearly.
 		// Comparing the bytes would make an uneven ramp silently change which
-		// diagonal a quad splits along, reintroducing the crease this exists
-		// to remove.
+		// diagonal a quad splits along.
 		order := [6]int{0, 1, 2, 0, 2, 3}
-		if aoLevels[0]+aoLevels[2] < aoLevels[1]+aoLevels[3] {
+		if aoLevels[0]+aoLevels[2] > aoLevels[1]+aoLevels[3] {
 			order = [6]int{0, 1, 3, 1, 2, 3}
 		}
 

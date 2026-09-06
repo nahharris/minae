@@ -1,6 +1,29 @@
 # M8 — Gentle directional sun tint
 
-**Status:** 📋 Planned — optional polish, and previously declined
+**Status:** ⏭️ Skipped — deliberately not implemented
+
+## Decision: skipped
+
+Hannah decided on 2026-09-05 not to implement this. Recorded here rather than
+deleted, because the reasoning is worth keeping if it is ever reconsidered.
+
+**Why it was skipped.** It was option C in the original design discussion and
+was declined then in favour of pure baked lighting. Nothing about the finished
+lighting looks wrong without it: face bias already conveys shape, and per-voxel
+skylight already conveys time of day through the skyTint uniform.
+
+Against that, it is the single item most likely to undo earlier work. The bug M4
+fixed was a directional sun term that left top faces unlit at every hour, and
+reintroducing a directional term reintroduces that whole class of bug. M7 then
+showed how easy it is to get a lighting detail subtly wrong in a way that passes
+every stated criterion -- the triangulation flip was inverted and no test
+noticed. Adding an optional visual flourish with that failure record, for an
+effect nobody has asked to see, is a poor trade.
+
+The design below is left intact. If it is ever picked up, criterion 6 -- that
+setting sunFloor to 1.0 reproduces the current output exactly -- matters most:
+it is what makes the feature revertible in one line when it turns out to look
+worse.
 
 ## Objective
 

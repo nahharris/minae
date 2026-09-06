@@ -7,7 +7,7 @@ same commit that implements them.
 The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
-M1-M7 are complete. Only M8 remains in the lighting backlog, and it is optional.
+The lighting backlog is finished: M1-M7 are complete and M8 was deliberately skipped.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -18,9 +18,9 @@ M1-M7 are complete. Only M8 remains in the lighting backlog, and it is optional.
 | [M5](milestones/M5-known-defects.md) | Clear the known-defect list | ✅ Done | Fixed a raycast freeze on negative-zero directions; normalized `dir` so `maxDist` is in world units |
 | [M6](milestones/M6-block-light.md) | Block light sources | ✅ Done | Glowstone emits; one BFS parameterized over two light channels |
 | [M7](milestones/M7-smooth-lighting.md) | Smooth lighting and ambient occlusion | ✅ Done | Per-vertex light sampling and corner darkening |
-| [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | 📋 Planned | Optional polish; previously declined |
+| [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | ⏭️ Skipped | Declined: reintroduces the bug class M4 fixed, for an effect nobody asked to see |
 
-Status legend: 📋 Planned · 🚧 In progress · ✅ Done
+Status legend: 📋 Planned · 🚧 In progress · ✅ Done · ⏭️ Skipped
 
 ## Known defects, not yet scheduled
 
@@ -45,8 +45,10 @@ would make the game most playable soonest.
 - Block light sources: done in [M6](milestones/M6-block-light.md). A torch with a
   proper thin cross-shaped model is still outstanding; glowstone is a full cube.
 - Ambient occlusion and smooth lighting: done in [M7](milestones/M7-smooth-lighting.md).
-- A gentle directional sun tint: scheduled as [M8](milestones/M8-sun-tint.md), and
-  optional -- it was declined in the original design.
+- A gentle directional sun tint: skipped, see [M8](milestones/M8-sun-tint.md).
+- Banding on large untextured surfaces is inherent to per-vertex lighting at
+  one-block resolution; see the note at the end of [M7](milestones/M7-smooth-lighting.md).
+  Dithering in the fragment shader would hide most of it. Not scheduled.
 
 **Rendering performance**
 - Frustum culling

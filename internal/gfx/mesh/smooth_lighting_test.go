@@ -129,22 +129,42 @@ func TestSmoothLighting_InsideCornerDarkens(t *testing.T) {
 	// being processed first in x,y,z order, keeps its faces at indices 0-5:
 	// its top face is faceTop (2).
 	//
-	// This same asymmetric-AO geometry is used (and the flip verified
-	// directly) in TestSmoothLighting_TriangulationFlipKeepsCornersTogether:
-	// ao=[V1=3,V2=2,V3=0,V4=2], so ao[0]+ao[2]=3 < ao[1]+ao[3]=4 and the
-	// triangulation flips from (V1,V2,V3),(V1,V3,V4) to (V1,V2,V4),(V2,V3,V4)
-	// -- V3 therefore lands at vertex index 4, not 2, and V4 at index 2.
-	_, _, v1B, _ := vertexColorAt(data, faceTop, 0) // V1
-	_, _, v2B, _ := vertexColorAt(data, faceTop, 1) // V2
-	_, _, v4B, _ := vertexColorAt(data, faceTop, 2) // V4
-	_, _, v3B, _ := vertexColorAt(data, faceTop, 4) // V3
-
-	const fullyOccluded = 102 // aoRamp[0]
-	if v3B != fullyOccluded {
-		t.Errorf("V3 (the shared inside corner) B = %d, want %d (fully occluded)", v3B, fullyOccluded)
+	// AO is collected per corner *position* rather than per emitted index.
+	// Which diagonal the quad splits along changes the order vertices come out
+	// in, and that is a rendering decision covered by TestAO_... — indexing by
+	// it here would make this geometric claim fail whenever that rule changes,
+	// for a reason having nothing to do with inside corners.
+	ao := make(map[[3]float32]uint8, 4)
+	posOff := faceTop * 6 * 3
+	for i := range 6 {
+		pos := [3]float32{
+			data.Vertices[posOff+i*3],
+			data.Vertices[posOff+i*3+1],
+			data.Vertices[posOff+i*3+2],
+		}
+		_, _, b, _ := vertexColorAt(data, faceTop, i)
+		ao[pos] = b
 	}
-	if v3B >= v1B || v3B >= v2B || v3B >= v4B {
-		t.Errorf("V3 B=%d is not strictly the lowest of V1=%d, V2=%d, V4=%d", v3B, v1B, v2B, v4B)
+	if len(ao) != 4 {
+		t.Fatalf("expected 4 distinct corners on the face, got %d: %v", len(ao), ao)
+	}
+
+	// The wall at (9,9,8) and the wall at (8,9,7) both border the +X/-Z corner
+	// of this top face, which sits at world (9,9,8). That is the inside corner.
+	const fullyOccluded = 102 // aoRamp[0]
+	inside := [3]float32{9, 9, 8}
+
+	got, ok := ao[inside]
+	if !ok {
+		t.Fatalf("no vertex at the expected inside corner %v; corners were %v", inside, ao)
+	}
+	if got != fullyOccluded {
+		t.Errorf("inside corner %v has B = %d, want %d (fully occluded)", inside, got, fullyOccluded)
+	}
+	for pos, b := range ao {
+		if pos != inside && b <= got {
+			t.Errorf("corner %v has B = %d, which is not brighter than the inside corner's %d", pos, b, got)
+		}
 	}
 }
 
@@ -265,49 +285,78 @@ func TestSmoothLighting_TriangulationFlipKeepsCornersTogether(t *testing.T) {
 	}
 
 	// No light was set (everything defaults to 0), so every corner's R and G
-	// are 0; corner identity is carried entirely by position and UV, which
-	// this test cross-checks against AO to prove they travel together.
+	// are 0; corner identity is carried entirely by position, UV and AO, which
+	// this test cross-checks to prove they travel together.
 	//
 	// Per-corner AO: V1=3 (255, unoccluded), V2=2 (204, B wall only),
 	// V3=0 (102, both B and C walls), V4=2 (204, C wall only).
-	// ao[0]+ao[2] = 3+0 = 3 < ao[1]+ao[3] = 2+2 = 4, so the triangulation
-	// flips from (V1,V2,V3),(V1,V3,V4) to (V1,V2,V4),(V2,V3,V4).
+	//
+	// The expected emission order is deliberately NOT written down here. Which
+	// diagonal a quad splits along is a rendering decision that TestAO_...
+	// covers on its own; pinning it here as well would mean any change to the
+	// flip rule fails this test for the wrong reason, and the fix would be to
+	// edit the expectation — exactly how a test gets bent to fit. What this
+	// test asserts is the property that must hold under *either* split: every
+	// emitted vertex's position, UV and colour belong to the same corner.
 	type corner struct {
-		x, y, z    float32 // world-space position
 		u, v       float32
 		r, g, b, a uint8
 	}
-	// World-space position = block origin (8,8,8) + local vertex offset.
-	corners := map[string]corner{
-		"V1": {8, 9, 9, 0, 1, 0, 0, 255, 255},
-		"V2": {9, 9, 9, 1, 1, 0, 0, 204, 255},
-		"V3": {9, 9, 8, 1, 0, 0, 0, 102, 255},
-		"V4": {8, 9, 8, 0, 0, 0, 0, 204, 255},
+	// Keyed by world-space position: block origin (8,8,8) + local offset.
+	corners := map[[3]float32]corner{
+		{8, 9, 9}: {0, 1, 0, 0, 255, 255},
+		{9, 9, 9}: {1, 1, 0, 0, 204, 255},
+		{9, 9, 8}: {1, 0, 0, 0, 102, 255},
+		{8, 9, 8}: {0, 0, 0, 0, 204, 255},
 	}
-	wantOrder := []string{"V1", "V2", "V4", "V2", "V3", "V4"}
 
 	const bytesPerFace = 6 * 4
 	posOff := faceTop * 6 * 3
 	uvOff := faceTop * 6 * 2
 	colOff := faceTop * bytesPerFace
 
-	for i, name := range wantOrder {
-		want := corners[name]
+	seen := make(map[[3]float32]int, 4)
 
-		px, py, pz := data.Vertices[posOff+i*3], data.Vertices[posOff+i*3+1], data.Vertices[posOff+i*3+2]
-		if px != want.x || py != want.y || pz != want.z {
-			t.Errorf("vertex %d: position (%v,%v,%v), want %s's (%v,%v,%v)", i, px, py, pz, name, want.x, want.y, want.z)
+	for i := range 6 {
+		pos := [3]float32{
+			data.Vertices[posOff+i*3],
+			data.Vertices[posOff+i*3+1],
+			data.Vertices[posOff+i*3+2],
 		}
+
+		want, ok := corners[pos]
+		if !ok {
+			t.Errorf("vertex %d sits at %v, which is not a corner of this face", i, pos)
+			continue
+		}
+		seen[pos]++
 
 		u, v := data.Texcoords[uvOff+i*2], data.Texcoords[uvOff+i*2+1]
 		if u != want.u || v != want.v {
-			t.Errorf("vertex %d: uv (%v,%v), want %s's (%v,%v)", i, u, v, name, want.u, want.v)
+			t.Errorf("vertex %d at %v: uv (%v,%v), want that corner's (%v,%v)", i, pos, u, v, want.u, want.v)
 		}
 
 		r, g, b, a := data.Colors[colOff+i*4], data.Colors[colOff+i*4+1], data.Colors[colOff+i*4+2], data.Colors[colOff+i*4+3]
 		if r != want.r || g != want.g || b != want.b || a != want.a {
-			t.Errorf("vertex %d: color (%d,%d,%d,%d), want %s's (%d,%d,%d,%d)", i, r, g, b, a, name, want.r, want.g, want.b, want.a)
+			t.Errorf("vertex %d at %v: colour (%d,%d,%d,%d), want that corner's (%d,%d,%d,%d)",
+				i, pos, r, g, b, a, want.r, want.g, want.b, want.a)
 		}
+	}
+
+	// Two triangles sharing a diagonal must use all four corners, with exactly
+	// the two on the shared diagonal appearing twice. Anything else means the
+	// quad was not triangulated as a quad.
+	if len(seen) != 4 {
+		t.Errorf("expected all 4 corners to be emitted, got %d distinct: %v", len(seen), seen)
+	}
+	twice := 0
+	for _, n := range seen {
+		if n == 2 {
+			twice++
+		}
+	}
+	if twice != 2 {
+		t.Errorf("expected exactly 2 corners emitted twice (the shared diagonal), got %d: %v", twice, seen)
 	}
 }
 
