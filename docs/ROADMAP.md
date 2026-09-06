@@ -7,8 +7,8 @@ same commit that implements them.
 The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
-The lighting backlog is finished (M1-M7 done, M8 skipped). Next up is player
-physics: M12 and M13.
+The lighting backlog is finished (M1-M7 done, M8 skipped). M12 landed the physics
+core; M13 wires it to the player.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -20,7 +20,7 @@ physics: M12 and M13.
 | [M6](milestones/M6-block-light.md) | Block light sources | ✅ Done | Glowstone emits; one BFS parameterized over two light channels |
 | [M7](milestones/M7-smooth-lighting.md) | Smooth lighting and ambient occlusion | ✅ Done | Per-vertex light sampling and corner darkening |
 | [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | ⏭️ Skipped | Declined: reintroduces the bug class M4 fixed, for an effect nobody asked to see |
-| [M12](milestones/M12-collision-core.md) | Collision and gravity core | 📋 Planned | Pure, GPU-free AABB resolver: gravity, jump, 0.6 step-up |
+| [M12](milestones/M12-collision-core.md) | Collision and gravity core | ✅ Done | Pure, GPU-free AABB resolver: gravity, jump, 0.6 step-up |
 | [M13](milestones/M13-player-controller.md) | Player controller | 📋 Planned | Give the player a body; walking by default, flight as a toggle |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done · ⏭️ Skipped

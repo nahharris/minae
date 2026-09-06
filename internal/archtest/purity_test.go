@@ -24,6 +24,7 @@ var purePackages = []string{
 	"github.com/nahharris/minae/internal/blocks/model",
 	"github.com/nahharris/minae/internal/world",
 	"github.com/nahharris/minae/internal/world/lighting",
+	"github.com/nahharris/minae/internal/physics",
 	"github.com/nahharris/minae/internal/platform/config",
 	"github.com/nahharris/minae/internal/platform/logging",
 	"github.com/nahharris/minae/internal/testutil",
