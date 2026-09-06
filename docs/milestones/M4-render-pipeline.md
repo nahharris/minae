@@ -1,6 +1,6 @@
 # M4 — Get light onto the screen
 
-**Status:** 🚧 Code complete, awaiting visual sign-off
+**Status:** ✅ Done
 **Design:** [2026-09-05 lighting and foundations](../superpowers/specs/2026-09-05-lighting-and-foundations-design.md)
 
 ## Goal
@@ -46,7 +46,7 @@ successor, so colour jumped instead of easing.
 - [x] Make the day-state ring circular; interpolate in linear float space;
       delete `lightDir` and the dead `SunIntensity`.
 - [x] Raise `.coverage-floor` from 29.0 to 31.0.
-- [ ] **Manual visual verification** — see the checklist below.
+- [x] **Manual visual verification** — signed off by Hannah on 2026-09-05.
 
 ## The model
 
@@ -101,7 +101,13 @@ mise run test:shaders
 
 ## Manual verification checklist
 
-The final verdict on this milestone is visual. Run the game and check:
+The final verdict on this milestone was visual, and Hannah confirmed on
+2026-09-05 that the world renders correctly -- specifically that the inverted
+brightness is gone.
+
+The list below is deliberately left unticked. It is not a record of that
+sign-off; it is the checklist to re-run whenever a shader, the vertex packing or
+the day cycle changes, since none of it can be covered by an automated test.
 
 - [ ] An enclosed cave with no opening is genuinely dark, and stays dark as the
       day cycle advances.

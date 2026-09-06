@@ -48,8 +48,7 @@ pure package regains a raylib dependency, directly or transitively.
 
 ## Known broken
 
-Nothing in the lighting pipeline, as of M4 — but M4 has not had visual
-sign-off yet, so treat that as provisional until someone has watched a sunrise.
+Nothing in the lighting pipeline. M4 was visually verified on 2026-09-05.
 
 Fixed across M3 and M4: light can be removed as well as added, so placing a
 block darkens what is beneath it; unloaded chunks are opaque rather than
@@ -89,7 +88,7 @@ For defects found but deliberately not fixed, see the roadmap.
 | Persistence | Data model supports it | No serialisation to disk |
 | Textures | Three PNGs, colour fallback otherwise | Full block texture set |
 | Blocks | 6 types | Transparency, liquids, stairs, fences, doors |
-| Lighting | Skylight, rendered. Awaiting visual sign-off | Block light sources, ambient occlusion, smooth lighting |
+| Lighting | Skylight, rendered and verified | Block light sources, ambient occlusion, smooth lighting |
 
 ## Verification
 
