@@ -151,7 +151,10 @@ func TestSmoothLighting_InsideCornerDarkens(t *testing.T) {
 
 	// The wall at (9,9,8) and the wall at (8,9,7) both border the +X/-Z corner
 	// of this top face, which sits at world (9,9,8). That is the inside corner.
-	const fullyOccluded = 102 // aoRamp[0]
+	// Read from the ramp rather than hard-coding a byte: the contrast is
+	// documented as tunable, and this test is about which corner is darkest,
+	// not about what that darkness happens to be worth today.
+	fullyOccluded := mesh.AORampForTest()[0]
 	inside := [3]float32{9, 9, 8}
 
 	got, ok := ao[inside]
@@ -303,11 +306,15 @@ func TestSmoothLighting_TriangulationFlipKeepsCornersTogether(t *testing.T) {
 		r, g, b, a uint8
 	}
 	// Keyed by world-space position: block origin (8,8,8) + local offset.
+	// AO bytes come from the ramp by level, not hard-coded: the contrast is
+	// documented as tunable and this test is about corners travelling together,
+	// not about the ramp's current values.
+	ramp := mesh.AORampForTest()
 	corners := map[[3]float32]corner{
-		{8, 9, 9}: {0, 1, 0, 0, 255, 255},
-		{9, 9, 9}: {1, 1, 0, 0, 204, 255},
-		{9, 9, 8}: {1, 0, 0, 0, 102, 255},
-		{8, 9, 8}: {0, 0, 0, 0, 204, 255},
+		{8, 9, 9}: {0, 1, 0, 0, ramp[3], 255},
+		{9, 9, 9}: {1, 1, 0, 0, ramp[2], 255},
+		{9, 9, 8}: {1, 0, 0, 0, ramp[0], 255},
+		{8, 9, 8}: {0, 0, 0, 0, ramp[2], 255},
 	}
 
 	const bytesPerFace = 6 * 4

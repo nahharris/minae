@@ -14,3 +14,10 @@ func SetAORampForTest(ramp [4]uint8) (restore func()) {
 	aoRamp = ramp
 	return func() { aoRamp = previous }
 }
+
+// AORampForTest exposes the ambient-occlusion ramp so tests can assert against
+// its levels by name rather than hard-coding byte values that change whenever
+// the contrast is tuned.
+func AORampForTest() [4]uint8 {
+	return aoRamp
+}

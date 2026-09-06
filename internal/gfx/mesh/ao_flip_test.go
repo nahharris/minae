@@ -73,3 +73,84 @@ func TestAO_NoFullyUnoccludedTriangleBesideAnOccludedCorner(t *testing.T) {
 		}
 	}
 }
+
+// A light-emitting block must not cast ambient occlusion.
+//
+// AO approximates how much surrounding geometry blocks incoming light. A
+// glowstone is not blocking light, it is light, and letting it occlude puts a
+// dark halo on exactly the surfaces it is illuminating — the lamp casting its
+// own shadow.
+//
+// Transparency is a separate question and is unchanged: an emitter is solid, so
+// light still does not pass through it.
+func TestAO_EmittingBlocksDoNotOcclude(t *testing.T) {
+	unoccluded := mesh.AORampForTest()[3]
+
+	build := func(t *testing.T, neighbour *blocks.Block) [4]uint8 {
+		t.Helper()
+
+		blocks.ResetToVanilla()
+
+		w := world.NewWorld()
+		c := world.NewChunk(0, 0)
+		w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
+
+		c.SetBlock(8, 8, 8, blocks.Stone)
+		c.SetBlock(9, 9, 9, neighbour) // diagonal corner neighbour of the top face
+
+		data := mesh.GenerateChunkMeshData(c, w, nil)
+		if data == nil {
+			t.Fatal("expected mesh data, got nil")
+		}
+
+		// Distinct AO values across the top face, keyed by corner position so
+		// the result does not depend on which diagonal the quad split along.
+		const bytesPerFace = 6 * 4
+		posOff := faceTop * 6 * 3
+		colOff := faceTop * bytesPerFace
+
+		byCorner := make(map[[3]float32]uint8, 4)
+		for i := range 6 {
+			pos := [3]float32{
+				data.Vertices[posOff+i*3],
+				data.Vertices[posOff+i*3+1],
+				data.Vertices[posOff+i*3+2],
+			}
+			byCorner[pos] = data.Colors[colOff+i*4+2]
+		}
+
+		var out [4]uint8
+		i := 0
+		for _, v := range byCorner {
+			out[i] = v
+			i++
+		}
+		return out
+	}
+
+	t.Run("a solid non-emitter occludes", func(t *testing.T) {
+		ao := build(t, blocks.Stone)
+
+		occluded := 0
+		for _, v := range ao {
+			if v != unoccluded {
+				occluded++
+			}
+		}
+		if occluded != 1 {
+			t.Errorf("stone diagonal neighbour produced %d occluded corners (AO %v), want exactly 1.\n"+
+				"Without this the emitter case below would pass vacuously.", occluded, ao)
+		}
+	})
+
+	t.Run("an emitter does not", func(t *testing.T) {
+		ao := build(t, blocks.Glowstone)
+
+		for _, v := range ao {
+			if v != unoccluded {
+				t.Errorf("glowstone diagonal neighbour darkened a corner to %d (all corners %v), want all %d.\n"+
+					"A light source must not cast ambient occlusion on what it lights.", v, ao, unoccluded)
+			}
+		}
+	})
+}
