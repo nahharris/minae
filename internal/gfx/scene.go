@@ -21,19 +21,37 @@ type SceneRenderer struct {
 	ChunkMeshes map[world.ChunkCoord]*rl.Mesh
 
 	// Shader Uniform Locations
-	LocLightDir   int32
-	LocLightColor int32
-	LocAmbient    int32
-	LocViewPos    int32
+	LocSkyTint    int32
+	LocBlockTint  int32
+	LocMinAmbient int32
 
-	// Reusable shader value buffers
-	shaderLightDir   []float32
-	shaderLightColor []float32
-	shaderAmbient    []float32
-	shaderViewPos    []float32
+	// Reusable shader value buffers, to avoid allocating every frame.
+	shaderSkyTint    []float32
+	shaderBlockTint  []float32
+	shaderMinAmbient []float32
 
 	Log *logrus.Entry
 }
+
+// Shader uniform names. These are looked up by string at runtime: a mismatch
+// between these and the GLSL source makes GetShaderLocation return -1 and
+// SetShaderValue silently do nothing, leaving the world lit by whatever the
+// uniform defaults to. shader_uniforms_test.go pins them to the actual source.
+const (
+	uniformSkyTint    = "skyTint"
+	uniformBlockTint  = "blockTint"
+	uniformMinAmbient = "minAmbient"
+	uniformTexture0   = "texture0"
+)
+
+// blockTint is the colour of light emitted by blocks. Nothing writes the block
+// light channel yet, so this has no visible effect; it is here so the shader
+// has a defined value and torches can light warm when they arrive.
+var blockTint = core.RGB{R: 1.0, G: 0.85, B: 0.6}
+
+// minAmbient keeps a sealed cave dim rather than pure black, so the player can
+// still make out geometry. A playability floor, not a physical term.
+const minAmbient = 0.035
 
 // NewSceneRenderer creates a new SceneRenderer using loaded resources.
 func NewSceneRenderer(res *resource.Resources) *SceneRenderer {
@@ -46,16 +64,24 @@ func NewSceneRenderer(res *resource.Resources) *SceneRenderer {
 	}
 
 	// Get Shader Locations
-	r.LocLightDir = rl.GetShaderLocation(r.Shader, "lightDir")
-	r.LocLightColor = rl.GetShaderLocation(r.Shader, "lightColor")
-	r.LocAmbient = rl.GetShaderLocation(r.Shader, "ambientColor")
-	r.LocViewPos = rl.GetShaderLocation(r.Shader, "viewPos")
+	r.LocSkyTint = rl.GetShaderLocation(r.Shader, uniformSkyTint)
+	r.LocBlockTint = rl.GetShaderLocation(r.Shader, uniformBlockTint)
+	r.LocMinAmbient = rl.GetShaderLocation(r.Shader, uniformMinAmbient)
 
 	// Initialize buffers
-	r.shaderLightDir = make([]float32, 3)
-	r.shaderLightColor = make([]float32, 4)
-	r.shaderAmbient = make([]float32, 4)
-	r.shaderViewPos = make([]float32, 3)
+	r.shaderSkyTint = make([]float32, 3)
+	r.shaderBlockTint = make([]float32, 3)
+	r.shaderMinAmbient = make([]float32, 1)
+
+	// blockTint and minAmbient never change, so set them once rather than
+	// every frame.
+	r.shaderBlockTint[0] = blockTint.R
+	r.shaderBlockTint[1] = blockTint.G
+	r.shaderBlockTint[2] = blockTint.B
+	rl.SetShaderValue(r.Shader, r.LocBlockTint, r.shaderBlockTint, rl.ShaderUniformVec3)
+
+	r.shaderMinAmbient[0] = minAmbient
+	rl.SetShaderValue(r.Shader, r.LocMinAmbient, r.shaderMinAmbient, rl.ShaderUniformFloat)
 
 	return r
 }
@@ -95,42 +121,20 @@ func (r *SceneRenderer) RemoveMesh(coord world.ChunkCoord) {
 	}
 }
 
-// SetLighting updates the shader uniforms for lighting.
-func (r *SceneRenderer) SetLighting(lightColor, ambientColor core.RGBA, lightDir core.Vec3) {
-	dir := ToVector3(lightDir)
-	r.shaderLightDir[0] = dir.X
-	r.shaderLightDir[1] = dir.Y
-	r.shaderLightDir[2] = dir.Z
-	rl.SetShaderValue(r.Shader, r.LocLightDir, r.shaderLightDir, rl.ShaderUniformVec3)
-
-	lc := rl.ColorNormalize(ToColor(lightColor))
-	r.shaderLightColor[0] = lc.X
-	r.shaderLightColor[1] = lc.Y
-	r.shaderLightColor[2] = lc.Z
-	r.shaderLightColor[3] = lc.W
-	rl.SetShaderValue(r.Shader, r.LocLightColor, r.shaderLightColor, rl.ShaderUniformVec4)
-
-	ac := rl.ColorNormalize(ToColor(ambientColor))
-	r.shaderAmbient[0] = ac.X
-	r.shaderAmbient[1] = ac.Y
-	r.shaderAmbient[2] = ac.Z
-	r.shaderAmbient[3] = ac.W
-	rl.SetShaderValue(r.Shader, r.LocAmbient, r.shaderAmbient, rl.ShaderUniformVec4)
-}
-
-// SetViewPosition updates the view position shader uniform.
-func (r *SceneRenderer) SetViewPosition(camera rl.Camera3D) {
-	r.shaderViewPos[0] = camera.Position.X
-	r.shaderViewPos[1] = camera.Position.Y
-	r.shaderViewPos[2] = camera.Position.Z
-	rl.SetShaderValue(r.Shader, r.LocViewPos, r.shaderViewPos, rl.ShaderUniformVec3)
+// SetLighting updates the daylight tint for the current time of day.
+//
+// This is the only per-frame lighting uniform. Per-voxel skylight is baked into
+// the chunk meshes, so the day cycle costs no re-meshing, and enclosed spaces
+// correctly ignore it.
+func (r *SceneRenderer) SetLighting(skyTint core.RGB) {
+	r.shaderSkyTint[0] = skyTint.R
+	r.shaderSkyTint[1] = skyTint.G
+	r.shaderSkyTint[2] = skyTint.B
+	rl.SetShaderValue(r.Shader, r.LocSkyTint, r.shaderSkyTint, rl.ShaderUniformVec3)
 }
 
 // Draw renders the scene.
 func (r *SceneRenderer) Draw(camera rl.Camera3D) {
-	// Update View Position Uniform
-	r.SetViewPosition(camera)
-
 	rl.BeginMode3D(camera)
 
 	for coord, mesh := range r.ChunkMeshes {

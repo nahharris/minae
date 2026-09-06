@@ -65,3 +65,7 @@ description = "Run tests with coverage and enforce the floor in .coverage-floor.
 [tasks.ci]
 depends = ["build", "vet", "cover", "lint"]
 description = "Run everything CI runs, locally."
+
+[tasks."test:shaders"]
+run = "go test -tags gpu -run TestShaderCompiles ./internal/gfx/"
+description = "Compile the GLSL shaders against a real GPU and check every uniform resolves. Needs a display, so CI cannot run it."

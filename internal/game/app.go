@@ -154,12 +154,13 @@ func (g *Game) Update() {
 func (g *Game) Draw() {
 	rl.BeginDrawing()
 
-	// Update Lighting Uniforms
-	skyColor, lightColor, ambientColor, lightDir := g.World.TimeOfDay.GetLightingState()
+	// The day cycle is a single tint multiplying baked skylight, so advancing
+	// time costs no re-meshing and enclosed spaces correctly ignore it.
+	skyColor, skyTint := g.World.TimeOfDay.GetLightingState()
 
 	rl.ClearBackground(render.ToColor(skyColor))
 
-	g.Renderer.SetLighting(lightColor, ambientColor, lightDir)
+	g.Renderer.SetLighting(skyTint)
 
 	// Draw 3D Scene (meshes)
 	g.Renderer.Draw(g.Player.Camera)

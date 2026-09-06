@@ -8,16 +8,18 @@ in vec4 vertexColor;
 out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
-out vec3 fragPosition;
 
 uniform mat4 mvp;
-uniform mat4 matModel;
 
 void main()
 {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
-    fragNormal = mat3(transpose(inverse(matModel))) * vertexNormal;
-    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0));
+
+    // Chunk model matrices are pure translation, so the normal survives the
+    // transform unchanged. The usual transpose(inverse(matModel)) is exact but
+    // costs a matrix inverse per vertex, every frame, to compute the identity.
+    fragNormal = vertexNormal;
+
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
