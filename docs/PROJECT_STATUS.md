@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M5](milestones/M5-known-defects.md).
+Last reviewed: 2026-09-05, at the close of [M6](milestones/M6-block-light.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -87,8 +87,8 @@ The roadmap's known-defect list is empty as of M5.
 | Physics | None — noclip flight | Collision, gravity, jumping |
 | Persistence | Data model supports it | No serialisation to disk |
 | Textures | Three PNGs, colour fallback otherwise | Full block texture set |
-| Blocks | 6 types | Transparency, liquids, stairs, fences, doors |
-| Lighting | Skylight, rendered and verified | Block light sources, ambient occlusion, smooth lighting |
+| Blocks | 7 types | Transparency, liquids, stairs, fences, doors |
+| Lighting | Skylight and block light (glowstone), rendered | Ambient occlusion, smooth lighting; a torch model |
 
 ## Verification
 
@@ -99,18 +99,18 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package, at the close of M5 (total 35.5%, floor 35.0):
+Coverage by package, at the close of M6 (total 38.9%, floor 38.0):
 
 | Package | Coverage |
 |---|---|
 | `core` | 100% |
-| `world/lighting` | 94.2% |
+| `world/lighting` | 95.8% |
 | `gfx/mesh` | 86.0% |
 | `testutil` | 85.4% |
 | `platform/config` | 78.6% |
-| `blocks` | 58.7% |
+| `blocks` | 68.9% |
 | `ui/core` | 37.5% |
-| `world` | 50.2% |
+| `world` | 53.8% |
 | `blocks/model`, `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/logging/raylog`, `platform/resources`, `player`, `ui/game` | 0% |
 
 (`archtest` reports no statements; it contains tests only.)

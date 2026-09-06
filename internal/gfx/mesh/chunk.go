@@ -11,6 +11,7 @@ type WorldReader interface {
 	GetBlock(x, y, z int) *blocks.Block
 	GetBlockState(x, y, z int) (*blocks.Block, uint8)
 	GetSkyLight(x, y, z int) uint8
+	GetBlockLight(x, y, z int) uint8
 	HasChunkAt(x, z int) bool
 }
 

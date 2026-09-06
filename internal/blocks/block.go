@@ -25,6 +25,10 @@ type Block struct {
 	// Model is the compiled runtime block model.
 	Model model.BlockModel `yaml:"-"`
 
+	// LightLevel is how much light this block emits, 0..15. Zero means the block
+	// emits nothing, which is the common case and the useful zero value.
+	LightLevel uint8 `yaml:"light_level"`
+
 	numericID NumID
 }
 

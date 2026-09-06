@@ -126,6 +126,45 @@ func (w *World) SetSkyLight(x, y, z int, level uint8) {
 	chunk.SetSkyLight(localX, y, localZ, level)
 }
 
+// GetBlockLight returns the block light level at the global world coordinates.
+//
+// It returns 0 when the chunk is missing, for a much simpler reason than the
+// skylight equivalent: block light comes from emitters placed in the world,
+// and an unloaded chunk has no stored data at all, so there is nothing to
+// report. This is not a stand-in for a "true" value the way skylight's 0 is;
+// it is just the absence of data.
+//
+// It also returns 0 when y is outside 0..config.ChunkHeight-1.
+func (w *World) GetBlockLight(x, y, z int) uint8 {
+	if y < 0 || y >= config.ChunkHeight {
+		return 0
+	}
+
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
+
+	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
+	if !exists {
+		return 0
+	}
+	return chunk.GetBlockLight(localX, y, localZ)
+}
+
+// SetBlockLight sets the block light level at the global world coordinates.
+// It is a silent no-op when the chunk is missing: there is nothing to store
+// the value in, and callers propagating light across a boundary should not
+// have to special-case unloaded neighbors.
+func (w *World) SetBlockLight(x, y, z int, level uint8) {
+	chunkX, localX := ChunkAndLocal(x)
+	chunkZ, localZ := ChunkAndLocal(z)
+
+	chunk, exists := w.Chunks[ChunkCoord{X: chunkX, Z: chunkZ}]
+	if !exists {
+		return
+	}
+	chunk.SetBlockLight(localX, y, localZ, level)
+}
+
 // HasChunkAt reports whether the chunk containing the given global block
 // coordinates is loaded.
 func (w *World) HasChunkAt(x, z int) bool {
