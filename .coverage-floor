@@ -4,4 +4,5 @@
 # legitimately cannot hold the line, that is a conversation, not a silent edit.
 #
 # 2026-09-05  M1  21.0  (measured 21.3 after the test harness landed)
-21.0
+# 2026-09-05  M2  21.5  (measured 21.5; internal/core landed at 100%)
+21.5

@@ -2,7 +2,7 @@
 
 **Minae** is a voxel game engine written in Go on top of raylib.
 
-Last reviewed: 2026-09-05, at the close of [M1](milestones/M1-foundations.md).
+Last reviewed: 2026-09-05, at the close of [M2](milestones/M2-core-purity.md).
 For what happens next, see the [roadmap](ROADMAP.md).
 
 This document describes what is *actually true today*, including what is
@@ -13,10 +13,13 @@ broken. Aspirations belong in the roadmap.
 ```
 cmd/minae/          Entry point
 internal/
+  archtest/         Architectural constraints the compiler cannot express
   blocks/           Block definitions, registry, models (full, sided, slab, orientable)
+  core/             Vec3 and RGBA — the pure value types the simulation speaks
   game/             Game coordinator and states
-  gfx/              Scene renderer, texture atlas, chunk meshing
+  gfx/              Scene renderer, texture atlas, chunk meshing, type conversion
   platform/         Config, logging, resource loading
+  platform/logging/raylog/   raylib trace-log bridge, isolated from logging
   player/           Camera and input
   testutil/         Synthetic world builder for tests
   ui/core/          UI framework (panels, buttons, labels, layout)
@@ -25,7 +28,23 @@ internal/
   world/lighting/   Skylight propagation and shaders
 ```
 
-16 packages, ~4,100 lines of non-test Go, ~680 lines of test.
+19 packages, ~4,200 lines of non-test Go, ~950 lines of test.
+
+### The raylib boundary
+
+raylib is cgo and needs OpenGL, X11 and Wayland headers to compile. Since M2 the
+simulation layer is free of it, so it can be tested with no GPU and no window:
+
+```
+cmd/minae ──► game ──► gfx          (raylib, GPU, shaders)
+                 ├──► player, ui    (raylib)
+                 └──► world ──► world/lighting    ◄── pure Go
+                          └──► blocks ──► core    ◄── pure Go
+```
+
+`internal/gfx/convert.go` holds `ToColor`, `ToVector3` and `FromVector3` — the
+only place the two type systems meet. `internal/archtest` fails the build if any
+pure package regains a raylib dependency, directly or transitively.
 
 ## Known broken
 
@@ -86,17 +105,20 @@ mise run ci
 Runs build, vet, race-enabled tests with the coverage floor, and lint — the
 same four gates CI enforces on every push and pull request.
 
-Coverage by package, at the close of M1 (total 21.3%, floor 21.0):
+Coverage by package, at the close of M2 (total 21.5%, floor 21.5):
 
 | Package | Coverage |
 |---|---|
+| `core` | 100% |
 | `gfx/mesh` | 85.6% |
 | `testutil` | 85.4% |
 | `platform/config` | 78.6% |
 | `blocks` | 58.7% |
 | `ui/core` | 37.5% |
 | `world` | 11.2% |
-| `blocks/model`, `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/resources`, `player`, `ui/game`, `world/lighting` | 0% |
+| `blocks/model`, `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/logging/raylog`, `platform/resources`, `player`, `ui/game`, `world/lighting` | 0% |
+
+(`archtest` reports no statements; it contains tests only.)
 
 `world/lighting` at 0% is the gap that matters most, and it is what
 [M3](milestones/M3-light-engine.md) closes.

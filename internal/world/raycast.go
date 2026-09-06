@@ -3,8 +3,8 @@ package world
 import (
 	"math"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/internal/blocks"
+	"github.com/nahharris/minae/internal/core"
 )
 
 // Raycast performs a 3D DDA raycast to find the first block hit.
@@ -16,7 +16,7 @@ import (
 // - pos: The global coordinates of the hit block [x, y, z]
 // - face: The normal of the face that was hit [x, y, z] (e.g., [0, 1, 0] for top)
 // - block: The block that was hit
-func (w *World) Raycast(start, dir rl.Vector3, maxDist float32) (bool, [3]int, [3]int, *blocks.Block) {
+func (w *World) Raycast(start, dir core.Vec3, maxDist float32) (bool, [3]int, [3]int, *blocks.Block) {
 	// Initial voxel coordinates
 	x := int(math.Floor(float64(start.X)))
 	y := int(math.Floor(float64(start.Y)))

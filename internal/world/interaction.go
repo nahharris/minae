@@ -3,9 +3,9 @@ package world
 import (
 	"math"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/internal/blocks"
 	"github.com/nahharris/minae/internal/blocks/model"
+	"github.com/nahharris/minae/internal/core"
 	"github.com/nahharris/minae/internal/platform/config"
 )
 
@@ -25,12 +25,12 @@ type InteractionResult struct {
 	HasTarget      bool
 }
 
-func raycastTarget(w *World, cameraPos, cameraDir rl.Vector3) (hit bool, pos [3]int, face [3]int) {
+func raycastTarget(w *World, cameraPos, cameraDir core.Vec3) (hit bool, pos [3]int, face [3]int) {
 	hit, pos, face, _ = w.Raycast(cameraPos, cameraDir, config.Current.PlayerArmLength)
 	return
 }
 
-func placingInsidePlayer(cameraPos rl.Vector3, placePos [3]int) bool {
+func placingInsidePlayer(cameraPos core.Vec3, placePos [3]int) bool {
 	return int(math.Floor(float64(cameraPos.X))) == placePos[0] &&
 		int(math.Floor(float64(cameraPos.Y))) == placePos[1] &&
 		int(math.Floor(float64(cameraPos.Z))) == placePos[2]
@@ -46,7 +46,7 @@ func applySlabMeta(base uint8, block *blocks.Block, face [3]int) uint8 {
 	return base
 }
 
-func applyOrientableMeta(base uint8, block *blocks.Block, viewDir rl.Vector3) uint8 {
+func applyOrientableMeta(base uint8, block *blocks.Block, viewDir core.Vec3) uint8 {
 	if !block.ModelSpec.Orientable {
 		return base
 	}
@@ -56,8 +56,8 @@ func applyOrientableMeta(base uint8, block *blocks.Block, viewDir rl.Vector3) ui
 	view.X = -view.X
 	view.Z = -view.Z
 
-	if rl.Vector3Length(view) > 0 {
-		view = rl.Vector3Normalize(view)
+	if view.Length() > 0 {
+		view = view.Normalize()
 	}
 
 	ax := float32(math.Abs(float64(view.X)))
@@ -84,7 +84,7 @@ func applyOrientableMeta(base uint8, block *blocks.Block, viewDir rl.Vector3) ui
 // ProcessBlockInteraction handles block breaking and placing logic.
 func ProcessBlockInteraction(
 	w *World,
-	cameraPos, cameraDir rl.Vector3,
+	cameraPos, cameraDir core.Vec3,
 	action InteractionAction,
 	blockToPlace *blocks.Block,
 	placeMeta uint8,

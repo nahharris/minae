@@ -8,14 +8,38 @@ Current focus: making the project verifiable, then fixing the lighting engine.
 The design behind milestones 1–4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
+Next up: [M3](milestones/M3-light-engine.md), the light engine rewrite.
+
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
 | [M1](milestones/M1-foundations.md) | Verifiable foundations | ✅ Done | CI, lint config, coverage ratchet, test harness, docs structure |
-| [M2](milestones/M2-core-purity.md) | Purify the core | 📋 Planned | Remove raylib from the simulation layer so lighting is testable without a GPU |
+| [M2](milestones/M2-core-purity.md) | Purify the core | ✅ Done | Remove raylib from the simulation layer so lighting is testable without a GPU |
 | [M3](milestones/M3-light-engine.md) | Rewrite the light engine | 📋 Planned | Incremental skylight with removal, correct cross-chunk propagation, dirty tracking |
 | [M4](milestones/M4-render-pipeline.md) | Get light onto the screen | 📋 Planned | Vertex-packed light, face bias, `skyTint` day cycle |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done
+
+## Known defects, not yet scheduled
+
+Found during M2 while converting types, and deliberately left alone so the
+refactor stayed a pure type refactor. Recorded here so they are not lost.
+
+- **`world/raycast.go` divides by zero on axis-aligned rays.** A `dir` component
+  of exactly 0 produces `±Inf` deltas, and `NaN` when the ray start lands on a
+  voxel boundary. `NaN` fails every comparison in the traversal loop, so the DDA
+  silently takes a wrong branch. Not reachable from the current camera, which
+  never produces an exactly-zero component — but unguarded.
+- **`world/raycast.go` never normalizes `dir`**, despite the doc comment saying
+  it does. `maxDist` is therefore measured in units of `|dir|` rather than world
+  units, so `PlayerArmLength` would scale with the camera's target distance. It
+  works today only because the camera target sits at radius 1.0.
+- **`world/time.go` computes `SunIntensity` and throws it away.** `LerpColors`
+  interpolates it, `GetLightingState` discards it with `_`, and nothing reads it.
+  Dead weight across 7 initialisers. M4 touches this file and should remove it.
+- **`world/time.go`'s `lerpColor` truncates rather than rounds**, and `t` is
+  never clamped to `[0, 1]`. An out-of-range `t` would wrap a channel from 255 to
+  0. Latent rather than live, since `getStateFromTime` currently keeps `t` in
+  range. M4 replaces this with linear float maths.
 
 ## Backlog
 

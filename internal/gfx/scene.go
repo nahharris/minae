@@ -2,6 +2,7 @@ package render
 
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/internal/core"
 	"github.com/nahharris/minae/internal/gfx/atlas"
 	"github.com/nahharris/minae/internal/gfx/mesh"
 	"github.com/nahharris/minae/internal/platform/config"
@@ -95,20 +96,21 @@ func (r *SceneRenderer) RemoveMesh(coord world.ChunkCoord) {
 }
 
 // SetLighting updates the shader uniforms for lighting.
-func (r *SceneRenderer) SetLighting(lightColor, ambientColor rl.Color, lightDir rl.Vector3) {
-	r.shaderLightDir[0] = lightDir.X
-	r.shaderLightDir[1] = lightDir.Y
-	r.shaderLightDir[2] = lightDir.Z
+func (r *SceneRenderer) SetLighting(lightColor, ambientColor core.RGBA, lightDir core.Vec3) {
+	dir := ToVector3(lightDir)
+	r.shaderLightDir[0] = dir.X
+	r.shaderLightDir[1] = dir.Y
+	r.shaderLightDir[2] = dir.Z
 	rl.SetShaderValue(r.Shader, r.LocLightDir, r.shaderLightDir, rl.ShaderUniformVec3)
 
-	lc := rl.ColorNormalize(lightColor)
+	lc := rl.ColorNormalize(ToColor(lightColor))
 	r.shaderLightColor[0] = lc.X
 	r.shaderLightColor[1] = lc.Y
 	r.shaderLightColor[2] = lc.Z
 	r.shaderLightColor[3] = lc.W
 	rl.SetShaderValue(r.Shader, r.LocLightColor, r.shaderLightColor, rl.ShaderUniformVec4)
 
-	ac := rl.ColorNormalize(ambientColor)
+	ac := rl.ColorNormalize(ToColor(ambientColor))
 	r.shaderAmbient[0] = ac.X
 	r.shaderAmbient[1] = ac.Y
 	r.shaderAmbient[2] = ac.Z
