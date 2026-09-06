@@ -7,7 +7,7 @@ import (
 	"github.com/nahharris/minae/internal/game"
 	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/platform/logging"
-	"github.com/nahharris/minae/internal/platform/resources"
+	resource "github.com/nahharris/minae/internal/platform/resources"
 	"github.com/sirupsen/logrus"
 )
 

@@ -1,0 +1,7 @@
+# Minimum total statement coverage, in percent. CI fails below this.
+#
+# This is a ratchet: raise it as milestones land, never lower it. If a change
+# legitimately cannot hold the line, that is a conversation, not a silent edit.
+#
+# 2026-09-05  M1  21.0  (measured 21.3 after the test harness landed)
+21.0

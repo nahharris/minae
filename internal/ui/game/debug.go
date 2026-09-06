@@ -6,8 +6,8 @@ import (
 	"runtime"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
-	"github.com/nahharris/minae/internal/ui/core"
 	"github.com/nahharris/minae/internal/platform/config"
+	minui "github.com/nahharris/minae/internal/ui/core"
 )
 
 func (u *UIManager) initDebug() {

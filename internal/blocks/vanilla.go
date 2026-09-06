@@ -1,8 +1,6 @@
 package blocks
 
 import (
-	"log"
-
 	"github.com/nahharris/minae/internal/blocks/model"
 )
 
@@ -39,6 +37,18 @@ var (
 	Wood = Register(&Block{ID: "minae/wood", Name: "Wood", Color: 0x8B4513FF})
 )
 
-func init() {
-	log.Println("Initializing blocks")
+// vanillaBlocks returns every built-in block, in registration order.
+func vanillaBlocks() []*Block {
+	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood}
+}
+
+// ResetToVanilla clears the registry and re-registers the built-in blocks.
+// Reset on its own leaves the package-level block variables holding
+// InvalidNumericID, so anything stored through them silently becomes air.
+// Tests that need a clean registry should call this instead.
+func ResetToVanilla() {
+	Reset()
+	for _, b := range vanillaBlocks() {
+		Register(b)
+	}
 }

@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # mise refuses to read an untrusted config, and a fresh runner trusts nothing.
+  MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+
+jobs:
+  build-test:
+    name: build, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # raylib-go is cgo and links against OpenGL, X11 and ALSA. These are
+      # needed to compile, not to run: no test opens a window.
+      - name: Install raylib build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev libasound2-dev
+
+      # mise.toml is the project's single source of truth for tool versions.
+      - uses: jdx/mise-action@v2
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Build
+        run: mise exec -- go build ./...
+
+      - name: Vet
+        run: mise exec -- go vet ./...
+
+      - name: Test
+        run: mise exec -- go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage floor
+        run: mise exec -- bash scripts/check-coverage.sh coverage.out .coverage-floor
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # golangci-lint type-checks the packages, so it needs the cgo headers too.
+      - name: Install raylib build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev libasound2-dev
+
+      - uses: jdx/mise-action@v2
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Lint
+        run: mise exec -- golangci-lint run

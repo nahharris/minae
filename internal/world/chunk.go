@@ -12,7 +12,6 @@ type Chunk struct {
 	Meta     [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	LightMap [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	X, Z     int // Chunk coordinates in the world grid (not world position)
-	meshHint chunkMeshHint
 }
 
 // NewChunk creates a new Chunk at the specified grid coordinates.
@@ -149,11 +148,4 @@ func (c *Chunk) SetLight(x, y, z int, level uint8) bool {
 // index = x + z*width + y*width*depth
 func (c *Chunk) getBlockIndex(x, y, z int) int {
 	return x + z*config.ChunkWidth + y*config.ChunkWidth*config.ChunkWidth
-}
-
-type chunkMeshHint struct {
-	vertices  int
-	texcoords int
-	normals   int
-	colors    int
 }

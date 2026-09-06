@@ -1,0 +1,18 @@
+# golangci-lint configuration for Minae.
+# Schema v2 (golangci-lint >= 2.0). Tool version is pinned by mise.toml.
+version: "2"
+
+linters:
+  # The standard set is errcheck, govet, ineffassign, staticcheck and unused,
+  # which covers the linters required by the project's Go rules. gosimple and
+  # stylecheck were folded into staticcheck in golangci-lint v2.
+  default: standard
+  enable:
+    # The Go rules require errors.Is/errors.As and %w wrapping; errorlint is
+    # what actually enforces that rather than leaving it to review.
+    - errorlint
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

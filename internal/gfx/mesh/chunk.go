@@ -64,14 +64,14 @@ func (d *ChunkMeshData) Upload() *rl.Mesh {
 	mesh := rl.Mesh{}
 	mesh.VertexCount = int32(len(d.Vertices) / 3)
 	mesh.TriangleCount = mesh.VertexCount / 3
-	
+
 	// We need to copy data because Raylib might not keep references or we might want to reuse buffers.
 	// In Go raylib bindings, we usually pass slices.
 	// Ideally we should use the specialized upload functions if available or just assign fields.
 	// Since the fields in rl.Mesh are *float32, we need to be careful about pointer validity.
 	// But d.Vertices is a slice, taking &d.Vertices[0] is safe as long as d exists.
 	// However, UploadMesh copies data to GPU.
-	
+
 	mesh.Vertices = &d.Vertices[0]
 	mesh.Normals = &d.Normals[0]
 	mesh.Texcoords = &d.Texcoords[0]
@@ -81,4 +81,3 @@ func (d *ChunkMeshData) Upload() *rl.Mesh {
 
 	return &mesh
 }
-

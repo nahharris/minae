@@ -3,9 +3,9 @@ package resource
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/internal/blocks"
+	"github.com/nahharris/minae/internal/gfx/atlas"
 	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/platform/logging"
-	"github.com/nahharris/minae/internal/gfx/atlas"
 	"github.com/nahharris/minae/internal/world/lighting"
 	"github.com/sirupsen/logrus"
 )
@@ -50,14 +50,14 @@ func (l *Loader) LoadRenderResources() (*Resources, error) {
 
 	// 1. Load Shader
 	shader := rl.LoadShaderFromMemory(lighting.VsCode, lighting.FsCode)
-	
+
 	// Set standard shader locations if they aren't automatically set
 	// Raylib usually handles standard names, but we verify or set custom ones later in SceneRenderer
-	
+
 	// 2. Create Material
 	mat := rl.LoadMaterialDefault()
 	mat.Shader = shader
-	
+
 	// 3. Build Atlas
 	var texAtlas *atlas.Atlas
 	if l.DataFolder != "" {
@@ -90,4 +90,3 @@ func (l *Loader) Unload(res *Resources) {
 		rl.UnloadTexture(res.Atlas.Texture)
 	}
 }
-

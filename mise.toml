@@ -1,6 +1,6 @@
 [tools]
 go = "1.25"
-golangci-lint = "latest"
+golangci-lint = "2.13.2"
 
 [env]
 MINAE_DATA_FOLDER = "data"
@@ -50,3 +50,18 @@ description = "Remove the compiled binary from the bin/ directory."
 [tasks."clean:setup"]
 description = "Delete files installed during setup."
 run = "rm raylib.dll"
+
+[tasks.vet]
+run = "go vet ./..."
+description = "Run go vet across all packages."
+
+[tasks.cover]
+run = [
+    "go test -race -covermode=atomic -coverprofile=coverage.out ./...",
+    "bash scripts/check-coverage.sh coverage.out .coverage-floor",
+]
+description = "Run tests with coverage and enforce the floor in .coverage-floor."
+
+[tasks.ci]
+depends = ["build", "vet", "cover", "lint"]
+description = "Run everything CI runs, locally."

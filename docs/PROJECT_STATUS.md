@@ -1,176 +1,107 @@
-# Minae Project Status Report
+# Minae — Project Status
 
-**Minae** is a voxel game engine (Minecraft-like) written in Go using Raylib. The codebase follows clean architecture principles (SOLID) with recent comprehensive refactoring completed.
+**Minae** is a voxel game engine written in Go on top of raylib.
 
----
+Last reviewed: 2026-09-05, at the close of [M1](milestones/M1-foundations.md).
+For what happens next, see the [roadmap](ROADMAP.md).
 
-## ✅ FULLY IMPLEMENTED
+This document describes what is *actually true today*, including what is
+broken. Aspirations belong in the roadmap.
 
-### Core Architecture
-- **Package Structure** - Clean separation following SOLID principles (`pkg/app`, `pkg/world`, `pkg/render`, `pkg/player`, etc.)
-- **State Management** - Game states (Playing, Paused) with proper transitions
-- **Resource Management** - Centralized loader (`pkg/resource/loader.go`) for config, blocks, shaders, textures
-- **Logging** - Structured logging with logrus, package-specific loggers, Raylib trace integration
+## Layout
 
-### Block System
-- **Block Registry** - Thread-safe global registry with numeric IDs
-- **Block Models** - Full blocks, sided blocks (grass), slabs, orientable blocks (4-way rotation)
-- **Block Metadata** - Support for slab top/bottom, facing direction
-- **Face Culling** - Efficient occlusion testing between neighboring blocks
-- **Custom Block Loading** - YAML-based block definitions from disk
+```
+cmd/minae/          Entry point
+internal/
+  blocks/           Block definitions, registry, models (full, sided, slab, orientable)
+  game/             Game coordinator and states
+  gfx/              Scene renderer, texture atlas, chunk meshing
+  platform/         Config, logging, resource loading
+  player/           Camera and input
+  testutil/         Synthetic world builder for tests
+  ui/core/          UI framework (panels, buttons, labels, layout)
+  ui/game/          HUD, pause menu, debug overlay
+  world/            World, chunks, terrain, time, raycasting, interaction
+  world/lighting/   Skylight propagation and shaders
+```
 
-### World System
-- **Chunk Storage** - 16x16x256 chunks with flat arrays for cache locality
-- **World Data** - Global coordinate system with chunk/local conversion (including negative coords)
-- **Block Interaction** - Set/Get blocks with metadata, neighbor chunk updates
-- **Raycasting** - 3D DDA algorithm for block targeting
+16 packages, ~4,100 lines of non-test Go, ~680 lines of test.
 
-### Rendering
-- **Mesh Generation** - Face-culled mesh building with vertex colors for lighting
-- **Texture Atlas** - Runtime atlas building from block textures with UV mapping
-- **Shader Pipeline** - Custom vertex/fragment shaders with uniforms for lighting
-- **Chunk Meshes** - GPU mesh upload/update/removal with proper cleanup
+## Known broken
 
-### Lighting
-- **Skylight Propagation** - BFS-based light spreading with cross-chunk support
-- **Day/Night Cycle** - 7 time states (dawn→sunrise→morning→noon→afternoon→sunset→night) with color interpolation
-- **Vertex Lighting** - Light levels encoded in vertex alpha channel
+**Lighting does not reach the screen.** The mesh builder writes skylight into
+the vertex alpha channel; the fragment shader multiplies by it in a way that
+cannot affect RGB. The entire flood-fill is computed and discarded. Separately,
+the directional sun vector is horizontal at every hour, so top faces never
+light up. Scheduled for [M3](milestones/M3-light-engine.md) and
+[M4](milestones/M4-render-pipeline.md).
 
-### Player System
-- **First-Person Camera** - Spherical coordinate rotation with pitch clamping
-- **Movement** - WASD + Space/Ctrl with configurable speed
-- **Inventory** - Scroll-based hotbar selection with all blocks
-- **Saveable State** - Position and inventory saved in world
+**Light cannot be removed.** `CalculateChunkLighting` only ever brightens.
+Placing a block never darkens anything.
 
-### UI System (minui)
-- **Custom UI Framework** - Panel-based layout with horizontal/vertical stacking
-- **Components** - Panels, buttons, labels (static & reactive), boxes
-- **HUD** - Crosshair, hotbar with selection highlighting
-- **Pause Menu** - Resume/Quit with modal overlay
-- **Debug Overlay** - FPS, memory stats, position, chunk coordinates, direction
+**Cross-chunk light propagation is unreliable.** `World.GetLight` returns 15
+for unloaded chunks, which halts the BFS; and light written into a neighbouring
+chunk never marks that chunk for re-meshing.
 
-### Input/Interaction
-- **Block Breaking** - Left-click to remove blocks
-- **Block Placing** - Right-click with face-based placement logic
-- **Slab Orientation** - Places top/bottom based on which face was clicked
-- **Block Orientation** - 4-way facing based on player view direction
+**The day cycle snaps.** `getStateFromTime` has no matching state for
+`hour ∈ [0, 0.2)` and falls through to a terminal night state, so colour jumps
+rather than interpolating.
 
----
+## Working
 
-## ⚠️ PARTIALLY IMPLEMENTED
+- **Blocks** — thread-safe registry with numeric IDs; full, sided, slab and
+  4-way orientable models; per-instance metadata; face-culling occlusion tests;
+  YAML block definitions loaded from disk.
+- **World** — 16×16×256 chunks in flat arrays; global coordinates with correct
+  negative-coordinate handling; 3D DDA raycasting for block targeting.
+- **Rendering** — face-culled mesh generation, runtime texture atlas with UV
+  mapping, chunk mesh upload and cleanup.
+- **Player** — first-person camera with pitch clamping, WASD + Space/Ctrl
+  movement, scroll-selected hotbar.
+- **Interaction** — break and place, with slab orientation from the clicked
+  face and 4-way facing from view direction.
+- **UI** — custom panel/stack layout framework; crosshair, hotbar, pause menu,
+  debug overlay.
+- **Platform** — YAML config with defaults, structured logrus logging,
+  centralised resource loader.
 
-### World Generation
-- **Current** - Simple flat terrain: 3 layers (stone, dirt, grass) at fixed height (y=32)
-- **Missing** - Noise-based terrain, caves, biomes, structures, trees, ores
+## Partially working
 
-### Chunk Management
-- **Current** - Fixed 3x3 grid centered at spawn
-- **Missing** - Infinite world streaming, chunk loading/unloading based on player position
+| Area | Today | Missing |
+|---|---|---|
+| Terrain | Flat plane: stone/dirt/grass at y=32 | Noise, caves, biomes, structures, ores |
+| Chunk management | Fixed 3×3 grid at spawn | Streaming based on player position |
+| Physics | None — noclip flight | Collision, gravity, jumping |
+| Persistence | Data model supports it | No serialisation to disk |
+| Textures | Three PNGs, colour fallback otherwise | Full block texture set |
+| Blocks | 6 types | Transparency, liquids, stairs, fences, doors |
+| Lighting | Skylight only, and it does not render | Block light sources; see *Known broken* |
 
-### Physics
-- **Current** - None (noclip flight mode)
-- **Missing** - Player collision with blocks, gravity, jumping
+## Verification
 
-### Save/Load System
-- **Current** - Architecture supports it (World contains PlayerState, TimeOfDay, Chunks)
-- **Missing** - Actual serialization to disk, world persistence
+```bash
+mise run ci
+```
 
-### Texture System
-- **Current** - Fallback to solid colors based on block.Color, atlas generation exists
-- **Missing** - Actual PNG texture files for blocks (currently uses generated colors)
+Runs build, vet, race-enabled tests with the coverage floor, and lint — the
+same four gates CI enforces on every push and pull request.
 
-### Block Types
-- **Current** - 6 basic blocks (Air, Stone, StoneSlab, Dirt, Grass, Wood)
-- **Missing** - Transparent blocks, liquids, stairs, fences, doors, redstone, etc.
+Coverage by package, at the close of M1 (total 21.3%, floor 21.0):
 
-### Lighting
-- **Current** - Skylight only (from above)
-- **Missing** - Block light sources (torches, glowstone), light-emitting blocks
+| Package | Coverage |
+|---|---|
+| `gfx/mesh` | 85.6% |
+| `testutil` | 85.4% |
+| `platform/config` | 78.6% |
+| `blocks` | 58.7% |
+| `ui/core` | 37.5% |
+| `world` | 11.2% |
+| `blocks/model`, `game`, `gfx`, `gfx/atlas`, `platform/logging`, `platform/resources`, `player`, `ui/game`, `world/lighting` | 0% |
 
----
+`world/lighting` at 0% is the gap that matters most, and it is what
+[M3](milestones/M3-light-engine.md) closes.
 
-## ❌ NOT IMPLEMENTED (Major Features)
+## Dependencies
 
-### Core Gameplay
-- **Terrain Generation** - Perlin/Simplex noise, biome system, cave generation
-- **Collision System** - AABB collision, player hitbox, block hitboxes
-- **Physics** - Gravity, velocity, jumping, falling damage
-- **Game Modes** - Survival vs Creative distinction
-
-### World Features
-- **Infinite World** - Dynamic chunk loading/unloading, chunk streaming
-- **World Persistence** - Save/load worlds to disk (world files)
-- **Structures** - Trees, buildings, caves, ore veins
-- **Vegetation** - Grass, flowers, tall grass
-
-### Block Features
-- **Transparency** - Glass, leaves, water rendering
-- **Liquids** - Water/lava flow physics
-- **Complex Blocks** - Stairs, fences, doors, trapdoors, chests
-- **Block Updates** - Redstone-like block update propagation
-
-### Performance
-- **Frustum Culling** - Don't render chunks outside camera view
-- **LOD System** - Lower detail for distant chunks
-- **Occlusion Culling** - Hide chunks behind other chunks
-- **Multi-threading** - Mesh generation on background threads
-- **Greedy Meshing** - Combine coplanar faces to reduce vertex count
-
-### Entities
-- **Entity System** - Framework for non-block objects
-- **Dropped Items** - Items as entities in world
-- **Mobs** - Animals, monsters, NPCs
-- **Projectiles** - Arrows, thrown items
-
-### Audio
-- **Sound System** - Block placement/breaking sounds, footsteps, ambient
-- **Music** - Background music system
-
-### UI/UX
-- **Main Menu** - World selection, options, create new world
-- **Settings Menu** - Graphics, controls, audio settings
-- **Inventory Screen** - Grid-based inventory management
-- **Key Remapping** - Customizable controls
-
-### Multiplayer
-- **Network Architecture** - Client-server model
-- **Multiplayer Worlds** - Join remote servers
-- **Player Entities** - See other players in world
-
-### Advanced Systems
-- **Crafting** - Recipe system, crafting table
-- **Mining** - Tool tiers, block hardness, drop items
-- **Smelting** - Furnaces, fuel
-- **Farming** - Crops, growth stages
-- **Redstone** - Circuits, power transmission, logic gates
-
----
-
-## 📊 CODEBASE METRICS
-
-| Package | Files | Purpose |
-|---------|-------|---------|
-| `pkg/app` | 2 | Application coordinator, game states |
-| `pkg/blocks` | 5 | Block definitions, models, registry |
-| `pkg/config` | 1 | Configuration, data folder management |
-| `pkg/logging` | 1 | Structured logging setup |
-| `pkg/player` | 1 | Runtime player (camera, input) |
-| `pkg/render` | 5 | Scene renderer, mesh generation, atlas |
-| `pkg/resource` | 1 | Centralized resource loading |
-| `pkg/ui` | 4 | UI manager, HUD, pause, debug |
-| `pkg/world` | 8 | World, chunks, lighting, time, interaction |
-| `minui` | 6 | Custom UI framework |
-
-**Total Lines of Code:** ~3,500 lines of Go  
-**Test Coverage:** Basic unit tests exist for chunks, mesh, blocks, config, layout  
-**Dependencies:** Raylib (graphics), logrus (logging), yaml.v3 (config)
-
----
-
-## 🎯 NEXT RECOMMENDED PRIORITIES
-
-1. **Collision Detection** - Add AABB collision so player doesn't fly through blocks
-2. **Infinite World** - Implement chunk streaming based on player position
-3. **World Persistence** - Save/load chunks and player data to disk
-4. **Better Terrain** - Add noise-based height variation
-5. **Frustum Culling** - Major performance improvement for larger worlds
+raylib (graphics), logrus (logging), yaml.v3 (config). Tool versions are pinned
+in `mise.toml`, which is the single source of truth — including for CI.

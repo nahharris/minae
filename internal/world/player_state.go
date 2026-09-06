@@ -15,4 +15,3 @@ func NewPlayerState() *PlayerState {
 		Inventory: blocks.GetAll(),
 	}
 }
-

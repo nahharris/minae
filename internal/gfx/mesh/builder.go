@@ -24,21 +24,6 @@ func (b *meshBuilder) reset() {
 	b.colors = b.colors[:0]
 }
 
-func (b *meshBuilder) ensureCapacity(h chunkMeshHint) {
-	if h.vertices > 0 && cap(b.vertices) < h.vertices {
-		b.vertices = make([]float32, 0, h.vertices)
-	}
-	if h.texcoords > 0 && cap(b.texcoords) < h.texcoords {
-		b.texcoords = make([]float32, 0, h.texcoords)
-	}
-	if h.normals > 0 && cap(b.normals) < h.normals {
-		b.normals = make([]float32, 0, h.normals)
-	}
-	if h.colors > 0 && cap(b.colors) < h.colors {
-		b.colors = make([]uint8, 0, h.colors)
-	}
-}
-
 func (b *meshBuilder) release() {
 	b.reset()
 	meshBuilderPool.Put(b)
@@ -48,14 +33,6 @@ var meshBuilderPool = sync.Pool{
 	New: func() any {
 		return &meshBuilder{}
 	},
-}
-
-// chunkMeshHint provides a hint for buffer allocation
-type chunkMeshHint struct {
-	vertices  int
-	texcoords int
-	normals   int
-	colors    int
 }
 
 // Pre-computed face normals to avoid allocations.
@@ -69,14 +46,8 @@ var (
 )
 
 func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *meshBuilder {
-	// Note: We can't access chunk.meshHint efficiently via interface without exposing it.
-	// For now, let's just use defaults or a reasonable initial size.
-	// Or we could add MeshHint() to ChunkReader interface, but that leaks implementation detail.
-	// Let's assume zero hint for now and let append handle it.
-
 	builder := meshBuilderPool.Get().(*meshBuilder)
 	builder.reset()
-	// builder.ensureCapacity(chunk.meshHint) // Skipped for now
 
 	addQuad := func(x, y, z int, q model.Quad, alpha uint8, uv atlas.UV) {
 		fx, fy, fz := float32(x), float32(y), float32(z)
