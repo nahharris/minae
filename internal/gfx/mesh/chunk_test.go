@@ -153,6 +153,22 @@ const (
 	faceBack
 )
 
+// setRightFaceLightPatch sets one light channel (via setter) uniformly
+// across the 3x3 neighbourhood that smooth lighting now samples for every
+// corner of a +X/right face: the outward cell (nx,ny,nz) plus its +/-1
+// neighbours along Y and Z, the two axes tangent to that face. Before M7 a
+// single cell was enough to make a whole face read one value; now every
+// corner averages over a small neighbourhood, so tests that want a flat,
+// uniform face (rather than a deliberate gradient) must light the whole
+// patch, not just the cell the face looks into.
+func setRightFaceLightPatch(setter func(x, y, z int, level uint8) bool, nx, ny, nz int, level uint8) {
+	for dy := -1; dy <= 1; dy++ {
+		for dz := -1; dz <= 1; dz++ {
+			setter(nx, ny+dy, nz+dz, level)
+		}
+	}
+}
+
 // The light engine reports 0 for a chunk it hasn't loaded, since unloaded
 // space must never look like open sky. But that correctness would render
 // the outward-facing edge of the loaded world as a black wall, so the mesh
@@ -193,10 +209,11 @@ func TestGenerateChunkMeshData_UnloadedNeighborFallsBackToFullBright(t *testing.
 		c := world.NewChunk(0, 0)
 		w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
-		// Now also load the neighbor chunk and give the boundary cell a
-		// known skylight value via the engine's own storage.
+		// Now also load the neighbor chunk and give the boundary cell (and
+		// its smooth-lighting patch, see setRightFaceLightPatch) a known
+		// skylight value via the engine's own storage.
 		neighbor := world.NewChunk(1, 0)
-		neighbor.SetSkyLight(0, 8, 8, 9)
+		setRightFaceLightPatch(neighbor.SetSkyLight, 0, 8, 8, 9)
 		w.Chunks[world.ChunkCoord{X: 1, Z: 0}] = neighbor
 
 		c.SetBlock(15, 8, 8, stone)
@@ -228,7 +245,7 @@ func TestVertexColor_SkylightMapping(t *testing.T) {
 			w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 			neighbor := world.NewChunk(1, 0)
-			neighbor.SetSkyLight(0, 8, 8, level)
+			setRightFaceLightPatch(neighbor.SetSkyLight, 0, 8, 8, level)
 			w.Chunks[world.ChunkCoord{X: 1, Z: 0}] = neighbor
 
 			c.SetBlock(15, 8, 8, stone)
@@ -288,9 +305,12 @@ func TestVertexColor_GBAConstant(t *testing.T) {
 }
 
 // TestVertexColor_FaceBiasNotBaked checks that a block lit uniformly on all
-// sides produces identical vertex colors on the top face and a side face.
-// Face brightness bias belongs in the shader, not the mesh, so the builder
-// must not encode any face-dependent variation.
+// sides produces identical vertex colors on the top face and a side face,
+// and that every corner of each of those faces agrees (validation criterion
+// 1: a flat, unoccluded surface in the middle of open, uniformly lit space
+// must not grow a gradient smooth lighting didn't intend). Face brightness
+// bias belongs in the shader, not the mesh, so the builder must not encode
+// any face-dependent variation either.
 func TestVertexColor_FaceBiasNotBaked(t *testing.T) {
 	blocks.Reset()
 	stone := blocks.Stone
@@ -301,15 +321,22 @@ func TestVertexColor_FaceBiasNotBaked(t *testing.T) {
 	w.Chunks[world.ChunkCoord{X: 0, Z: 0}] = c
 
 	// Place the block away from any chunk edge so every face's neighbor is
-	// inside this same loaded chunk, then explicitly light every neighbor
-	// cell to the same level.
+	// inside this same loaded chunk, then light the whole 3x3x3 shell around
+	// it to the same level. Smooth lighting samples up to a 3x3 patch of
+	// cells per face (see setRightFaceLightPatch), not just the single cell
+	// the face looks into, so every cell any corner of any face could touch
+	// must agree for the whole block to read as uniformly, flatly lit.
 	c.SetBlock(8, 8, 8, stone)
-	c.SetSkyLight(9, 8, 8, 15) // +X (right)
-	c.SetSkyLight(7, 8, 8, 15) // -X (left)
-	c.SetSkyLight(8, 9, 8, 15) // +Y (top)
-	c.SetSkyLight(8, 7, 8, 15) // -Y (bottom)
-	c.SetSkyLight(8, 8, 9, 15) // +Z (front)
-	c.SetSkyLight(8, 8, 7, 15) // -Z (back)
+	for dx := -1; dx <= 1; dx++ {
+		for dy := -1; dy <= 1; dy++ {
+			for dz := -1; dz <= 1; dz++ {
+				if dx == 0 && dy == 0 && dz == 0 {
+					continue
+				}
+				c.SetSkyLight(8+dx, 8+dy, 8+dz, 15)
+			}
+		}
+	}
 
 	data := mesh.GenerateChunkMeshData(c, w, nil)
 	if data == nil {
@@ -322,6 +349,24 @@ func TestVertexColor_FaceBiasNotBaked(t *testing.T) {
 	if topR != sideR || topG != sideG || topB != sideB || topA != sideA {
 		t.Errorf("top face color (%d,%d,%d,%d) != side face color (%d,%d,%d,%d); face bias must not be baked into vertex color",
 			topR, topG, topB, topA, sideR, sideG, sideB, sideA)
+	}
+
+	// Every corner of both faces must match the first vertex: smooth
+	// lighting must not invent a gradient where the light is uniform.
+	const bytesPerFace = 6 * 4
+	for _, face := range []struct {
+		name string
+		idx  int
+	}{{"top", faceTop}, {"front", faceFront}} {
+		off := face.idx * bytesPerFace
+		for v := 0; v < 6; v++ {
+			i := off + v*4
+			r, g, b, a := data.Colors[i], data.Colors[i+1], data.Colors[i+2], data.Colors[i+3]
+			if r != topR || g != topG || b != topB || a != topA {
+				t.Errorf("%s face vertex %d: (%d,%d,%d,%d) != uniform (%d,%d,%d,%d)",
+					face.name, v, r, g, b, a, topR, topG, topB, topA)
+			}
+		}
 	}
 
 	// Sanity: the shared light level should show up as full-bright R.
