@@ -142,15 +142,52 @@ func TestDirtyChunksMatchesActualChanges(t *testing.T) {
 	}
 
 	after := snapshot(w)
+
+	changed := make(map[world.ChunkCoord]bool, len(after))
 	for coord, lightAfter := range after {
-		changed := lightAfter != before[coord]
-		switch {
-		case changed && !reported[coord]:
+		changed[coord] = lightAfter != before[coord]
+	}
+
+	// Every chunk whose light changed must be reported: missing one leaves a
+	// stale mesh on screen.
+	for coord, didChange := range changed {
+		if didChange && !reported[coord] {
 			t.Errorf("chunk %+v changed but was not reported dirty; its mesh would go stale", coord)
-		case !changed && reported[coord]:
-			t.Errorf("chunk %+v was reported dirty but its light is identical; that is a wasted re-mesh", coord)
 		}
 	}
+
+	// A chunk may also be reported without its own light changing, and that is
+	// correct rather than wasteful: a block is lit by the cells around it, so a
+	// change on a seam invalidates the neighbour's mesh too. A solid wall on a
+	// chunk border is the extreme case — none of its own cells can ever change,
+	// yet its faces must be redrawn.
+	//
+	// What must not happen is a chunk being reported for no reason at all, so
+	// the tolerance is bounded: an unchanged chunk may only be reported if it
+	// actually touches one that changed.
+	for coord := range reported {
+		if changed[coord] {
+			continue
+		}
+		if !touchesAChangedChunk(coord, changed) {
+			t.Errorf("chunk %+v was reported dirty, its light did not change, and it does not "+
+				"neighbour any chunk whose light did; that is a genuinely wasted re-mesh", coord)
+		}
+	}
+}
+
+// touchesAChangedChunk reports whether coord is within one chunk of a chunk
+// whose light changed, diagonals included — the range over which a light change
+// can invalidate a neighbouring chunk's mesh.
+func touchesAChangedChunk(coord world.ChunkCoord, changed map[world.ChunkCoord]bool) bool {
+	for dx := -1; dx <= 1; dx++ {
+		for dz := -1; dz <= 1; dz++ {
+			if changed[world.ChunkCoord{X: coord.X + dx, Z: coord.Z + dz}] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // The property world is a 2x2 chunk grid spanning block coordinates -16..15 in

@@ -151,3 +151,39 @@ coverage 29.4%, floor raised to 29.0. `internal/world/lighting` went from 0% to
 **Not verified:** nothing here has been seen on screen, because the renderer
 still discards the light. M4 closes that loop and carries the manual visual
 checklist.
+
+## Follow-up fix: stale meshes on chunk seams
+
+Reported from a screenshot: placing a glowstone in a dark room left one wall
+pitch black. Destroying a block in that wall made it re-render correctly.
+
+The dirty set recorded **the chunk each changed cell lives in**. But a block's
+faces are lit by the cells *around* it — since M7's smooth lighting, by a 2×2
+patch per corner, so up to one step away including diagonally. A block one step
+across a chunk seam is therefore lit by cells in the neighbouring chunk.
+
+A solid wall standing on a seam is the case that makes this visible, and it is
+the worst case rather than an edge case: **no cell inside the wall's chunk can
+ever change**, because every cell in it is rock sitting at 0. Light the room on
+the other side and the engine correctly reports the room's chunk and nothing
+else. The wall keeps rendering the darkness baked into its mesh until something
+unrelated forces a re-mesh — which is exactly what breaking a block in it did.
+
+`markMeshDirty` now records the changed cell's chunk plus, when the cell sits on
+a border, the neighbouring chunks that render it. Interior cells — the
+overwhelming majority of writes — still cost a single map insert, so the BFS
+inner loop is unaffected.
+
+`DirtyChunks` is now documented as "chunks whose meshes are invalidated" rather
+than "chunks whose light changed". The distinction is the whole bug.
+
+### A test that encoded the wrong contract
+
+`TestDirtyChunksMatchesActualChanges` asserted that reporting a chunk whose
+light did not change was "a wasted re-mesh". That was the old contract, and it
+failed the moment the fix landed.
+
+Rather than delete the check, it now bounds the tolerance: an unchanged chunk
+may be reported only if it actually touches a chunk that did change. Reporting a
+seam neighbour is correct; reporting an unrelated chunk is still a bug worth
+catching.
