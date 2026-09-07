@@ -26,7 +26,7 @@ streaming, generation and biomes.
 | [M14](milestones/M14-async-chunk-pipeline.md) | Async chunk pipeline | ✅ Done | Generation and meshing off the main thread, behind a stage pipeline |
 | [M15](milestones/M15-chunk-streaming.md) | Chunk streaming | ✅ Done | The world follows the player; the fixed 3×3 grid goes away |
 | [M16](milestones/M16-noise-foundation.md) | Noise foundation | ✅ Done | Deterministic OpenSimplex2, fBm, domain warping, splines |
-| [M17](milestones/M17-plains-terrain.md) | Plains terrain | 📋 Planned | Real ground: continentalness, erosion, peaks-and-valleys through splines |
+| [M17](milestones/M17-plains-terrain.md) | Plains terrain | ✅ Done | Real ground: continentalness, erosion, peaks-and-valleys through splines |
 | [M18](milestones/M18-vegetation-features.md) | Trees and bushes | 📋 Planned | The first features, and the first transparent block |
 | [M19](milestones/M19-data-driven-biomes.md) | Data-driven biomes | 📋 Planned | Multi-noise parameter space including mysticness; 3D density |
 

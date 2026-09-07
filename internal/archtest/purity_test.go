@@ -29,6 +29,7 @@ var purePackages = []string{
 	"github.com/nahharris/minae/internal/platform/logging",
 	"github.com/nahharris/minae/internal/testutil",
 	"github.com/nahharris/minae/internal/noise",
+	"github.com/nahharris/minae/internal/worldgen",
 }
 
 func TestPurePackagesDoNotDependOnRaylib(t *testing.T) {
