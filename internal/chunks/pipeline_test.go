@@ -22,7 +22,7 @@ const maxDriveIterations = 10_000
 // generousBudget lights and meshes far more than nine chunks can ever need in
 // one call, so tests that are not specifically about budgeting can drive the
 // pipeline to completion in the fewest possible calls.
-var generousBudget = chunks.Budget{Light: 64, Mesh: 64}
+var generousBudget = chunks.Budget{Light: time.Second, Mesh: time.Second}
 
 // stubGenerator is a Generator a test can inspect and, per coord, hold up
 // deliberately. It always eventually returns an empty chunk (air throughout,
@@ -284,6 +284,17 @@ func TestPipeline_DuplicateRequestDoesNotDuplicateWork(t *testing.T) {
 // fully-requested 3x3 neighbourhood, where every chunk becomes eligible for
 // lighting (and, later, meshing) in the same Update call — the scenario that
 // would most tempt an unbudgeted implementation to do all nine at once.
+//
+// Budget is a duration now (see Budget's doc comment for why a fixed chunk
+// count stopped meaning anything once terrain got real relief), so this
+// cannot assert an exact "at most N chunks per call" the way a count-based
+// budget could: how much work fits in a given duration depends on how fast
+// the machine is. What the design does guarantee, and what this checks
+// instead, is the property a budget exists for in the first place: a budget
+// too small to finish everything in one call defers the rest to later
+// calls — it does not silently do all nine anyway — and a generous budget
+// finishes essentially at once. Both halves also check that a zero budget
+// makes no progress at all, however many times it is called.
 func TestPipeline_BudgetsAreHonoured(t *testing.T) {
 	gen := newStubGenerator()
 	p, _ := newTestPipeline(t, gen, 4)
@@ -297,28 +308,84 @@ func TestPipeline_BudgetsAreHonoured(t *testing.T) {
 	t.Run("Light", func(t *testing.T) {
 		drainUntil(t, p, chunks.Budget{Light: 0, Mesh: 0}, func() bool { return atLeast(p, coords, chunks.Generated) })
 
-		for i := 0; i < 9; i++ {
-			before := countAtLeast(p, coords, chunks.Lit)
-			p.Update(chunks.Budget{Light: 1, Mesh: 0})
-			after := countAtLeast(p, coords, chunks.Lit)
+		// A zero budget must light nothing, no matter how many times it is
+		// called: this is the "budget<=0 does no lighting" contract other
+		// callers (including a caller that has not opted into streaming
+		// terrain yet) depend on.
+		for range 5 {
+			p.Update(chunks.Budget{Light: 0, Mesh: 0})
+		}
+		if got := countAtLeast(p, coords, chunks.Lit); got != 0 {
+			t.Fatalf("Light budget 0 lit %d of %d chunks across several calls, want 0", got, len(coords))
+		}
 
-			if got := after - before; got > 1 {
-				t.Fatalf("call %d: Light budget 1 lit %d chunks in one call, want at most 1", i, got)
+		// The deadline is checked after each chunk (see seedLit's doc
+		// comment), so an implausibly tiny positive budget still guarantees
+		// forward progress — one chunk per call — while remaining too small
+		// to finish a fully-eligible 3x3 neighbourhood in a single call. If
+		// it did finish in one call, the budget would not be bounding
+		// anything.
+		calls := 0
+		for calls < maxDriveIterations {
+			p.Update(chunks.Budget{Light: time.Nanosecond, Mesh: 0})
+			calls++
+			if atLeast(p, coords, chunks.Lit) {
+				break
 			}
 		}
 
+		if calls <= 1 {
+			t.Fatalf("a 1ns Light budget lit all %d chunks in a single Update call; the budget is not deferring anything", len(coords))
+		}
 		if !atLeast(p, coords, chunks.Lit) {
-			t.Fatalf("after 9 calls with Light budget 1, not every one of 9 chunks reached Lit (lit count = %d)", countAtLeast(p, coords, chunks.Lit))
+			t.Fatalf("after %d calls with a 1ns Light budget, not every chunk reached Lit (lit count = %d)", maxDriveIterations, countAtLeast(p, coords, chunks.Lit))
 		}
 	})
 
 	t.Run("Mesh", func(t *testing.T) {
-		seen := make(map[world.ChunkCoord]bool)
-		for i := 0; i < maxDriveIterations && len(seen) < len(coords); i++ {
-			ready := p.Update(chunks.Budget{Light: 0, Mesh: 1})
-			if len(ready) > 1 {
-				t.Fatalf("call %d: Mesh budget 1 returned %d meshes in one call, want at most 1", i, len(ready))
+		// Light generously but keep Mesh at 0, so every chunk is dispatched
+		// for meshing (dispatchMeshing is unbudgeted) without any of the
+		// finished results being drained yet — otherwise a generous Mesh
+		// budget here would mark chunks Meshed before the budget-1ns loop
+		// below ever got a chance to observe them arriving one at a time.
+		drainUntil(t, p, chunks.Budget{Light: time.Second, Mesh: 0}, func() bool { return atLeast(p, coords, chunks.Meshing) })
+
+		// Stage flips to Meshing the instant a job is *sent* to a worker, not
+		// once the (trivially cheap, air-only) mesh is actually computed. So
+		// that the loop below is exercising the deadline check itself rather
+		// than racing real workers for who finishes first, give the pool a
+		// moment to actually finish and push every result into the (buffered,
+		// capacity well over 9) results channel before draining anything.
+		time.Sleep(100 * time.Millisecond)
+
+		// A zero Mesh budget must drain nothing, even though results may
+		// already be sitting in the channel.
+		for range 5 {
+			ready := p.Update(chunks.Budget{Light: 0, Mesh: 0})
+			if len(ready) != 0 {
+				t.Fatalf("Mesh budget 0 returned %d meshes, want 0", len(ready))
 			}
+		}
+
+		// Unlike seedLit, draining a finished result is a channel receive plus
+		// two map writes — no per-item cost anywhere close to what a single
+		// clock tick can resolve. An experiment driving 1200 pending results
+		// through this same loop measured the entire drain, even at a 1ns
+		// budget, inside one tick on this machine: below some volume of
+		// backlog, "the deadline was checked and already passed" and "the
+		// deadline was never checked at all" are not distinguishable by wall
+		// clock, because the work in between two checks can complete in less
+		// time than the clock can report as having elapsed. So this does not
+		// assert "requires more than one call" the way the Light case above
+		// does — that assertion would be genuinely flaky here, not just
+		// theoretically at risk. What it still checks, deterministically, is
+		// that a positive budget drains every result exactly once with none
+		// dropped, across however many calls that takes.
+		seen := make(map[world.ChunkCoord]bool)
+		calls := 0
+		for calls < maxDriveIterations && len(seen) < len(coords) {
+			ready := p.Update(chunks.Budget{Light: 0, Mesh: time.Nanosecond})
+			calls++
 			for _, r := range ready {
 				if seen[r.Coord] {
 					t.Errorf("coord %v returned twice by Update", r.Coord)
@@ -328,7 +395,7 @@ func TestPipeline_BudgetsAreHonoured(t *testing.T) {
 		}
 
 		if len(seen) != len(coords) {
-			t.Fatalf("collected %d distinct meshes across many budget-1 calls, want %d", len(seen), len(coords))
+			t.Fatalf("collected %d distinct meshes across many budget-1ns calls, want %d", len(seen), len(coords))
 		}
 	})
 }

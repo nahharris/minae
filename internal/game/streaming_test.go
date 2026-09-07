@@ -105,7 +105,7 @@ func TestStreaming_MemoryStaysAtSteadyStateOverALongWalk(t *testing.T) {
 	streamer := chunks.NewStreamer(pipeline, loadRadius, unloadRadius)
 	renderer := newFakeRenderer()
 
-	budget := chunks.Budget{Light: 64, Mesh: 64}
+	budget := chunks.Budget{Light: time.Second, Mesh: time.Second}
 
 	step := func(center world.ChunkCoord) {
 		t.Helper()

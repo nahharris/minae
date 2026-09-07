@@ -89,7 +89,7 @@ func buildThroughPipeline(t *testing.T, workers int, want []world.ChunkCoord) (*
 	}
 
 	meshes := map[world.ChunkCoord]*mesh.ChunkMeshData{}
-	budget := chunks.Budget{Light: 64, Mesh: 64}
+	budget := chunks.Budget{Light: time.Second, Mesh: time.Second}
 
 	// Bounded by wall time, not iterations. Update is non-blocking by design,
 	// so a tight loop spins through thousands of calls in a few milliseconds --
@@ -228,7 +228,7 @@ func TestPipeline_RaceUnderConcurrentEditing(t *testing.T) {
 	// chunk, so a fast enough edit stream keeps the pipeline permanently
 	// behind and nothing would ever reach Meshed. What matters is that the
 	// overlap is safe, and that the pipeline converges once the burst stops.
-	budget := chunks.Budget{Light: 2, Mesh: 2}
+	budget := chunks.Budget{Light: time.Millisecond, Mesh: time.Millisecond}
 	edits := 0
 
 	burst := time.Now().Add(1500 * time.Millisecond)
@@ -349,7 +349,7 @@ func TestPipeline_MatchesSynchronousOutputOnVariedTerrain(t *testing.T) {
 	asyncMeshes := map[world.ChunkCoord]*mesh.ChunkMeshData{}
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) && len(asyncMeshes) < len(coords) {
-		for _, r := range p.Update(chunks.Budget{Light: 64, Mesh: 64}) {
+		for _, r := range p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second}) {
 			asyncMeshes[r.Coord] = r.Data
 		}
 		runtime.Gosched()
@@ -443,7 +443,7 @@ func TestPipeline_LateSolidNeighbourForcesReMesh(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
-			for _, r := range p.Update(chunks.Budget{Light: 64, Mesh: 64}) {
+			for _, r := range p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second}) {
 				latest[r.Coord] = r.Data
 			}
 			if until() {

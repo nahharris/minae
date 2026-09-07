@@ -83,6 +83,28 @@ func blockExpected(from uint8, _ direction) uint8 {
 	return decayByOne(from)
 }
 
+// lightSurface is whatever a propagation walk reads and writes cells
+// through. *world.World satisfies it directly (every method already exists
+// on World), and chunkView satisfies it too - see chunkview.go - by
+// resolving each call against a fixed nine-pointer neighbourhood instead of
+// World's map.
+//
+// Every hot per-cell path (propagateAdd, runRemove, setLight,
+// enqueueNeighbourBorders) is written against this interface rather than
+// against *world.World directly, so SeedChunk can hand them a chunkView -
+// no map lookup per cell - while RecomputeAll and OnBlockChanged keep using
+// the live World unchanged, exactly as before.
+type lightSurface interface {
+	GetSkyLight(x, y, z int) uint8
+	SetSkyLight(x, y, z int, level uint8)
+	GetBlockLight(x, y, z int) uint8
+	SetBlockLight(x, y, z int, level uint8)
+	GetBlock(x, y, z int) *blocks.Block
+	HasChunkAt(x, z int) bool
+}
+
+var _ lightSurface = (*world.World)(nil)
+
 // lightKind describes one propagation channel to the shared BFS: how to read
 // a cell's current level, how to write it, and how a level decays across a
 // step in a given direction. Skylight and block light are identical in every
@@ -90,22 +112,22 @@ func blockExpected(from uint8, _ direction) uint8 {
 // parameterized over a lightKind, replace what would otherwise be two nearly
 // identical copies of both.
 type lightKind struct {
-	get      func(w *world.World, x, y, z int) uint8
-	set      func(w *world.World, x, y, z int, level uint8)
+	get      func(s lightSurface, x, y, z int) uint8
+	set      func(s lightSurface, x, y, z int, level uint8)
 	expected func(from uint8, d direction) uint8
 }
 
 // skyKind is the skylight propagation channel.
 var skyKind = lightKind{
-	get:      (*world.World).GetSkyLight,
-	set:      (*world.World).SetSkyLight,
+	get:      func(s lightSurface, x, y, z int) uint8 { return s.GetSkyLight(x, y, z) },
+	set:      func(s lightSurface, x, y, z int, level uint8) { s.SetSkyLight(x, y, z, level) },
 	expected: skyExpected,
 }
 
 // blockKind is the block light propagation channel.
 var blockKind = lightKind{
-	get:      (*world.World).GetBlockLight,
-	set:      (*world.World).SetBlockLight,
+	get:      func(s lightSurface, x, y, z int) uint8 { return s.GetBlockLight(x, y, z) },
+	set:      func(s lightSurface, x, y, z int, level uint8) { s.SetBlockLight(x, y, z, level) },
 	expected: blockExpected,
 }
 
@@ -119,7 +141,32 @@ type Engine struct {
 	reAdd       []lightNode
 
 	dirty map[world.ChunkCoord]struct{}
+
+	// dirtyMemo remembers which chunks are already in dirty, so a propagation
+	// that writes tens of thousands of cells inside one chunk pays a single
+	// map insert rather than one per cell. Profiling put markMeshDirty at 22%
+	// of SeedChunk once the map lookups elsewhere were gone: the set was
+	// being told the same thing about the same chunk forty thousand times.
+	//
+	// A linear scan beats a map here because the entry count is tiny and
+	// bounded. Light cannot leave the 3x3 neighbourhood it starts in (it caps
+	// at 15 and loses a level per horizontal step, against 16-wide chunks),
+	// and border writes mark one chunk further out, so at most 25 distinct
+	// chunks can be marked by one operation. Scanning up to 25 sixteen-byte
+	// comparisons costs less than one hash.
+	//
+	// Correctness rests on one invariant: skipping an insert is only safe
+	// while the coord really is still in dirty. Anything that empties or
+	// bypasses dirty must call resetDirtyMemo — see DirtyChunks and
+	// markChunksDirty.
+	dirtyMemo    [dirtyMemoCap]world.ChunkCoord
+	dirtyMemoLen int
 }
+
+// dirtyMemoCap is sized above the 25-chunk bound argued on Engine.dirtyMemo,
+// so the memo cannot fill in practice. If it ever does, markDirtyChunk
+// degrades to inserting every time, which is slower but still correct.
+const dirtyMemoCap = 32
 
 // NewEngine returns an engine that lights w.
 func NewEngine(w *world.World) *Engine {
@@ -173,7 +220,7 @@ func (e *Engine) RecomputeAll() {
 		}
 	}
 
-	e.propagateAdd(skyKind)
+	e.propagateAdd(e.w, skyKind)
 
 	e.addQueue = e.addQueue[:0]
 
@@ -202,7 +249,7 @@ func (e *Engine) RecomputeAll() {
 		}
 	}
 
-	e.propagateAdd(blockKind)
+	e.propagateAdd(e.w, blockKind)
 }
 
 // OnBlockChanged updates the lighting after the block at the given global
@@ -227,16 +274,16 @@ func (e *Engine) updateSkyLight(x, y, z int, block *blocks.Block) {
 		}
 		e.removeQueue = e.removeQueue[:0]
 		e.reAdd = e.reAdd[:0]
-		e.setLight(skyKind, x, y, z, 0)
+		e.setLight(e.w, skyKind, x, y, z, 0)
 		e.removeQueue = append(e.removeQueue, lightNode{x, y, z, old})
-		e.runRemove(skyKind)
+		e.runRemove(e.w, skyKind)
 		return
 	}
 
 	e.addQueue = e.addQueue[:0]
 
 	if y == config.ChunkHeight-1 {
-		e.setLight(skyKind, x, y, z, MaxSkyLight)
+		e.setLight(e.w, skyKind, x, y, z, MaxSkyLight)
 		e.addQueue = append(e.addQueue, lightNode{x, y, z, MaxSkyLight})
 	}
 
@@ -251,7 +298,7 @@ func (e *Engine) updateSkyLight(x, y, z int, block *blocks.Block) {
 		}
 	}
 
-	e.propagateAdd(skyKind)
+	e.propagateAdd(e.w, skyKind)
 }
 
 // updateBlockLight applies the block-light half of OnBlockChanged. It first
@@ -267,15 +314,15 @@ func (e *Engine) updateBlockLight(x, y, z int, block *blocks.Block) {
 	if old > 0 {
 		e.removeQueue = e.removeQueue[:0]
 		e.reAdd = e.reAdd[:0]
-		e.setLight(blockKind, x, y, z, 0)
+		e.setLight(e.w, blockKind, x, y, z, 0)
 		e.removeQueue = append(e.removeQueue, lightNode{x, y, z, old})
-		e.runRemove(blockKind)
+		e.runRemove(e.w, blockKind)
 	}
 
 	e.addQueue = e.addQueue[:0]
 
 	if block != nil && block.LightLevel > 0 {
-		e.setLight(blockKind, x, y, z, block.LightLevel)
+		e.setLight(e.w, blockKind, x, y, z, block.LightLevel)
 		e.addQueue = append(e.addQueue, lightNode{x, y, z, block.LightLevel})
 	}
 
@@ -292,7 +339,7 @@ func (e *Engine) updateBlockLight(x, y, z int, block *blocks.Block) {
 		}
 	}
 
-	e.propagateAdd(blockKind)
+	e.propagateAdd(e.w, blockKind)
 }
 
 // SeedChunk lights a chunk that has just been added to the world, and lets
@@ -326,19 +373,39 @@ func (e *Engine) SeedChunk(coord world.ChunkCoord) {
 		return
 	}
 
-	e.seedSkyLight(coord, chunk)
-	e.seedBlockLight(coord, chunk)
+	// A fixed nine-pointer view of coord and its eight neighbours, built
+	// once and reused for both channels: every read and write either seeding
+	// walk performs stays inside it, by construction (see chunkview.go), so
+	// this replaces what the CPU profile showed as the dominant cost -
+	// resolving map[ChunkCoord]*Chunk from scratch on every one of the
+	// ~860,000 light reads and writes a chunk's seeding used to perform.
+	view := newChunkView(e.w, coord)
+
+	e.seedSkyLight(coord, chunk, view)
+	e.seedBlockLight(coord, chunk, view)
 }
 
 // seedSkyLight is the skylight half of SeedChunk: a top-down column scan of
 // the new chunk identical to RecomputeAll's, plus every already-lit skylight
 // cell on a neighbouring chunk's border that can still shed light across the
-// seam, then one propagation.
-func (e *Engine) seedSkyLight(coord world.ChunkCoord, chunk *world.Chunk) {
+// seam, then one propagation - all resolved through view instead of the
+// live world.
+//
+// Every open-sky cell is set to MaxSkyLight regardless of height, but only
+// cells at or below the neighbourhood's ceiling (see
+// chunkView.neighbourhoodCeiling) are enqueued for propagation. Above that
+// ceiling, every column in every loaded chunk in the neighbourhood is open
+// sky at full brightness already - directly, from its own column scan, once
+// it too is seeded - so no horizontal step from one to another can ever
+// raise anything, and enqueueing those cells would just be wasted BFS work.
+// With M17's terrain this cuts roughly 190 enqueues per column down to
+// however many actually sit below the local relief.
+func (e *Engine) seedSkyLight(coord world.ChunkCoord, chunk *world.Chunk, view *chunkView) {
 	e.addQueue = e.addQueue[:0]
 
 	baseX := coord.X * config.ChunkWidth
 	baseZ := coord.Z * config.ChunkWidth
+	ceiling := view.neighbourhoodCeiling()
 
 	for lx := range config.ChunkWidth {
 		for lz := range config.ChunkWidth {
@@ -352,21 +419,29 @@ func (e *Engine) seedSkyLight(coord world.ChunkCoord, chunk *world.Chunk) {
 				if !isTransparent(chunk.GetBlock(lx, y, lz)) {
 					break
 				}
-				e.setLight(skyKind, x, y, z, MaxSkyLight)
-				e.addQueue = append(e.addQueue, lightNode{x, y, z, MaxSkyLight})
+				e.setLight(view, skyKind, x, y, z, MaxSkyLight)
+				if y <= ceiling {
+					e.addQueue = append(e.addQueue, lightNode{x, y, z, MaxSkyLight})
+				}
 			}
 		}
 	}
 
-	e.enqueueNeighbourBorders(coord, skyKind)
-	e.propagateAdd(skyKind)
+	e.enqueueNeighbourBorders(coord, skyKind, view)
+	e.propagateAdd(view, skyKind)
 }
 
 // seedBlockLight is the block-light half of SeedChunk: a full-volume scan of
 // the new chunk for emitting blocks identical to RecomputeAll's, plus every
 // already-lit block-light cell on a neighbouring chunk's border that can
-// still shed light across the seam, then one propagation.
-func (e *Engine) seedBlockLight(coord world.ChunkCoord, chunk *world.Chunk) {
+// still shed light across the seam, then one propagation - all resolved
+// through view instead of the live world.
+//
+// There is no ceiling shortcut here: an emitter can sit anywhere in the
+// column, including well above any terrain, so unlike the skylight scan
+// there is no height past which every cell is already known to be at the
+// same value everywhere in the neighbourhood.
+func (e *Engine) seedBlockLight(coord world.ChunkCoord, chunk *world.Chunk, view *chunkView) {
 	e.addQueue = e.addQueue[:0]
 
 	baseX := coord.X * config.ChunkWidth
@@ -384,14 +459,14 @@ func (e *Engine) seedBlockLight(coord world.ChunkCoord, chunk *world.Chunk) {
 
 				x := baseX + lx
 				z := baseZ + lz
-				e.setLight(blockKind, x, y, z, blk.LightLevel)
+				e.setLight(view, blockKind, x, y, z, blk.LightLevel)
 				e.addQueue = append(e.addQueue, lightNode{x, y, z, blk.LightLevel})
 			}
 		}
 	}
 
-	e.enqueueNeighbourBorders(coord, blockKind)
-	e.propagateAdd(blockKind)
+	e.enqueueNeighbourBorders(coord, blockKind, view)
+	e.propagateAdd(view, blockKind)
 }
 
 // enqueueNeighbourBorders appends, for every already-loaded chunk that
@@ -406,7 +481,7 @@ func (e *Engine) seedBlockLight(coord world.ChunkCoord, chunk *world.Chunk) {
 // step, which would only write a 0 into a new chunk that already reads 0
 // everywhere. propagateAdd would discard such a node on its first iteration
 // anyway; filtering here just means the walk never has to look at it.
-func (e *Engine) enqueueNeighbourBorders(coord world.ChunkCoord, kind lightKind) {
+func (e *Engine) enqueueNeighbourBorders(coord world.ChunkCoord, kind lightKind, view *chunkView) {
 	baseX := coord.X * config.ChunkWidth
 	baseZ := coord.Z * config.ChunkWidth
 
@@ -414,7 +489,7 @@ func (e *Engine) enqueueNeighbourBorders(coord world.ChunkCoord, kind lightKind)
 		if d.DY != 0 {
 			continue
 		}
-		if e.w.GetChunk(coord.X+d.DX, coord.Z+d.DZ) == nil {
+		if !view.hasNeighbourChunk(d.DX, d.DZ) {
 			continue
 		}
 
@@ -440,7 +515,7 @@ func (e *Engine) enqueueNeighbourBorders(coord world.ChunkCoord, kind lightKind)
 			nx, nz := x+d.DX, z+d.DZ
 
 			for y := range config.ChunkHeight {
-				level := kind.get(e.w, nx, y, nz)
+				level := kind.get(view, nx, y, nz)
 				if kind.expected(level, into) == 0 {
 					continue
 				}
@@ -462,6 +537,7 @@ func (e *Engine) DirtyChunks() []world.ChunkCoord {
 	if len(e.dirty) == 0 {
 		return nil
 	}
+	e.resetDirtyMemo()
 	out := make([]world.ChunkCoord, 0, len(e.dirty))
 	for c := range e.dirty {
 		out = append(out, c)
@@ -471,8 +547,14 @@ func (e *Engine) DirtyChunks() []world.ChunkCoord {
 }
 
 // propagateAdd drains e.addQueue, propagating light of the given kind
-// outward from every queued cell according to kind.expected.
-func (e *Engine) propagateAdd(kind lightKind) {
+// outward from every queued cell according to kind.expected, reading and
+// writing every cell through surface.
+//
+// surface is e.w for RecomputeAll and OnBlockChanged, which must be able to
+// reach any loaded chunk, and a chunkView for SeedChunk, which never needs
+// to: see chunkView's doc comment for why treating anything outside the
+// nine-chunk view as absent is safe here specifically.
+func (e *Engine) propagateAdd(surface lightSurface, kind lightKind) {
 	for head := 0; head < len(e.addQueue); head++ {
 		node := e.addQueue[head]
 		if node.Level == 0 {
@@ -484,19 +566,19 @@ func (e *Engine) propagateAdd(kind lightKind) {
 			if ny < 0 || ny >= config.ChunkHeight {
 				continue
 			}
-			if !e.w.HasChunkAt(nx, nz) {
+			if !surface.HasChunkAt(nx, nz) {
 				continue
 			}
 
 			want := kind.expected(node.Level, d)
-			if want <= kind.get(e.w, nx, ny, nz) {
+			if want <= kind.get(surface, nx, ny, nz) {
 				continue
 			}
-			if !isTransparent(e.w.GetBlock(nx, ny, nz)) {
+			if !isTransparent(surface.GetBlock(nx, ny, nz)) {
 				continue
 			}
 
-			e.setLight(kind, nx, ny, nz, want)
+			e.setLightKnown(surface, kind, nx, ny, nz, want)
 			e.addQueue = append(e.addQueue, lightNode{nx, ny, nz, want})
 		}
 	}
@@ -505,8 +587,9 @@ func (e *Engine) propagateAdd(kind lightKind) {
 
 // runRemove drains e.removeQueue for the given kind, darkening cells that
 // were lit solely by the light being removed, then re-propagates from every
-// cell found to have an independent source (e.reAdd).
-func (e *Engine) runRemove(kind lightKind) {
+// cell found to have an independent source (e.reAdd). Every read and write
+// goes through surface - see propagateAdd's doc comment.
+func (e *Engine) runRemove(surface lightSurface, kind lightKind) {
 	for head := 0; head < len(e.removeQueue); head++ {
 		node := e.removeQueue[head]
 
@@ -515,14 +598,14 @@ func (e *Engine) runRemove(kind lightKind) {
 			if ny < 0 || ny >= config.ChunkHeight {
 				continue
 			}
-			if !e.w.HasChunkAt(nx, nz) {
+			if !surface.HasChunkAt(nx, nz) {
 				continue
 			}
-			if !isTransparent(e.w.GetBlock(nx, ny, nz)) {
+			if !isTransparent(surface.GetBlock(nx, ny, nz)) {
 				continue
 			}
 
-			nl := kind.get(e.w, nx, ny, nz)
+			nl := kind.get(surface, nx, ny, nz)
 			if nl == 0 {
 				continue
 			}
@@ -542,7 +625,7 @@ func (e *Engine) runRemove(kind lightKind) {
 			// it is phrased in terms of kind.expected rather than hard-coded
 			// to skylight's rule.
 			if nl == kind.expected(node.Level, d) {
-				e.setLight(kind, nx, ny, nz, 0)
+				e.setLight(surface, kind, nx, ny, nz, 0)
 				e.removeQueue = append(e.removeQueue, lightNode{nx, ny, nz, nl})
 			} else {
 				e.reAdd = append(e.reAdd, lightNode{nx, ny, nz, nl})
@@ -552,22 +635,44 @@ func (e *Engine) runRemove(kind lightKind) {
 
 	e.addQueue = e.addQueue[:0]
 	e.addQueue = append(e.addQueue, e.reAdd...)
-	e.propagateAdd(kind)
+	e.propagateAdd(surface, kind)
 }
 
 // setLight routes every light write of the given kind through one place: it
 // is a no-op if the chunk is not loaded or the value is unchanged, and
 // otherwise writes the new level and records the owning chunk as dirty.
-func (e *Engine) setLight(kind lightKind, x, y, z int, level uint8) {
-	if !e.w.HasChunkAt(x, z) {
+func (e *Engine) setLight(surface lightSurface, kind lightKind, x, y, z int, level uint8) {
+	if !surface.HasChunkAt(x, z) {
 		return
 	}
-	if kind.get(e.w, x, y, z) == level {
+	if kind.get(surface, x, y, z) == level {
 		return
 	}
-	kind.set(e.w, x, y, z, level)
+	kind.set(surface, x, y, z, level)
 
-	e.markMeshDirty(x, z)
+	e.markMeshDirty(surface, x, z)
+}
+
+// setLightKnown is setLight without the two guards, for callers that have
+// already established both: that the chunk is loaded, and that level differs
+// from what the cell currently holds.
+//
+// It exists because propagateAdd establishes exactly those two facts one line
+// earlier and setLight then re-established them, each costing another
+// resolution of the same chunk. In the innermost loop of the light engine
+// that was two of five resolutions per write, spent re-deriving something the
+// caller had just proved.
+//
+// This is the narrow version of collapsing repeated lookups: it drops checks
+// the caller already made, and deliberately does not hoist the cell index into
+// the hot loop. That would couple this code to Chunk's memory layout and put
+// the index arithmetic in a second place, which is worth far more than the
+// instructions it would save -- see docs/design/parallel-lighting.md.
+//
+// Callers that have not established both facts must use setLight.
+func (e *Engine) setLightKnown(surface lightSurface, kind lightKind, x, y, z int, level uint8) {
+	kind.set(surface, x, y, z, level)
+	e.markMeshDirty(surface, x, z)
 }
 
 // markMeshDirty records every loaded chunk whose mesh depends on the light in
@@ -584,11 +689,11 @@ func (e *Engine) setLight(kind lightKind, x, y, z int, level uint8) {
 // because every cell in it is rock sitting at 0. Marking only the changed
 // cell's chunk leaves that wall rendering its old darkness until something
 // else happens to re-mesh it.
-func (e *Engine) markMeshDirty(x, z int) {
+func (e *Engine) markMeshDirty(surface lightSurface, x, z int) {
 	cx, lx := world.ChunkAndLocal(x)
 	cz, lz := world.ChunkAndLocal(z)
 
-	e.dirty[world.ChunkCoord{X: cx, Z: cz}] = struct{}{}
+	e.markDirtyChunk(world.ChunkCoord{X: cx, Z: cz})
 
 	dxs, nx := borderSpan(lx)
 	dzs, nz := borderSpan(lz)
@@ -604,10 +709,12 @@ func (e *Engine) markMeshDirty(x, z int) {
 			if dx == 0 && dz == 0 {
 				continue
 			}
-			if e.w.GetChunk(cx+dx, cz+dz) == nil {
+			// Any point inside the neighbouring chunk works here; only its
+			// existence is being tested.
+			if !surface.HasChunkAt((cx+dx)*config.ChunkWidth, (cz+dz)*config.ChunkWidth) {
 				continue
 			}
-			e.dirty[world.ChunkCoord{X: cx + dx, Z: cz + dz}] = struct{}{}
+			e.markDirtyChunk(world.ChunkCoord{X: cx + dx, Z: cz + dz})
 		}
 	}
 }
@@ -632,7 +739,37 @@ func borderSpan(local int) (offsets [2]int, n int) {
 // markChunksDirty marks every loaded chunk dirty. Used by RecomputeAll,
 // which rewrites every loaded chunk's skylight and block light.
 func (e *Engine) markChunksDirty() {
+	e.resetDirtyMemo()
 	for coord := range e.w.Chunks {
 		e.dirty[coord] = struct{}{}
 	}
+}
+
+// markDirtyChunk records coord as needing its mesh rebuilt, skipping the map
+// insert when the memo already knows it is there. See Engine.dirtyMemo for why
+// this exists and what makes skipping safe.
+func (e *Engine) markDirtyChunk(coord world.ChunkCoord) {
+	for i := range e.dirtyMemoLen {
+		if e.dirtyMemo[i] == coord {
+			return
+		}
+	}
+
+	e.dirty[coord] = struct{}{}
+
+	if e.dirtyMemoLen < len(e.dirtyMemo) {
+		e.dirtyMemo[e.dirtyMemoLen] = coord
+		e.dirtyMemoLen++
+	}
+	// Past capacity the memo simply stops learning. Every later call for an
+	// unremembered chunk repeats the insert, which is redundant rather than
+	// wrong, and the bound on Engine.dirtyMemo says it cannot happen anyway.
+}
+
+// resetDirtyMemo forgets everything the memo knows. It must be called
+// whenever dirty is emptied or written behind markDirtyChunk's back;
+// otherwise the memo would claim a chunk is already marked when it is not,
+// and its mesh would never be rebuilt.
+func (e *Engine) resetDirtyMemo() {
+	e.dirtyMemoLen = 0
 }
