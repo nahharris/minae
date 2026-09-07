@@ -36,6 +36,20 @@ type Player struct {
 	// descend instead of jumping.
 	Flying bool
 
+	// Held, when true, freezes the body for this Update: physics.Step is not
+	// called at all, so position does not integrate, and vertical velocity is
+	// zeroed so gravity cannot resume mid-fall with speed already
+	// accumulated the instant the ground beneath the player loads.
+	//
+	// This is the M15 "the player is held, not dropped" rule: a player who
+	// outruns the chunk loader must not fall through the ungenerated terrain
+	// underneath them. app.go sets this before calling Update, from whether
+	// the chunk containing the player's current position has reached
+	// chunks.Generated in the pipeline -- Player itself knows nothing about
+	// chunks or pipelines, only that it has been told to hold. It has no
+	// effect on camera look, so a held player can still look around.
+	Held bool
+
 	WalkSpeed        float32
 	FlySpeed         float32
 	MouseSensitivity float32
@@ -203,7 +217,7 @@ func (p *Player) Update(dt float32, grid physics.Grid) {
 	}
 
 	intent := BuildIntent(in, lookDir, p.Flying, p.WalkSpeed, p.FlySpeed)
-	physics.Step(&p.Body, grid, p.PhysicsConfig, intent, dt)
+	stepBody(&p.Body, grid, p.PhysicsConfig, intent, dt, p.Held)
 
 	// The camera is derived from the body every frame through this one path;
 	// nothing else in this method (or anywhere else) assigns Camera.Position.
@@ -223,6 +237,26 @@ func (p *Player) Update(dt float32, grid physics.Grid) {
 			p.SelectedBlockIndex = 0
 		}
 	}
+}
+
+// stepBody advances b by one tick according to in, unless held: a held body
+// does not move at all -- physics.Step is not called, so position is not
+// integrated on any axis -- except that its vertical velocity is zeroed, so
+// gravity does not resume mid-fall with speed already built up the instant
+// the ground beneath it loads. See the Held field's doc comment for why this
+// exists.
+//
+// Pulled out as a plain function of its arguments, rather than inlined in
+// Update, so the M15 "player is held, not dropped" behaviour is testable
+// without a live raylib window: Update itself calls rl.GetMouseDelta and
+// friends, which panic outside one, exactly as BuildIntent was pulled out in
+// M13 for the same reason.
+func stepBody(b *physics.Body, grid physics.Grid, cfg physics.Config, in physics.Intent, dt float32, held bool) {
+	if held {
+		b.Velocity.Y = 0
+		return
+	}
+	physics.Step(b, grid, cfg, in, dt)
 }
 
 // rotateCamera rotates the camera's view direction.

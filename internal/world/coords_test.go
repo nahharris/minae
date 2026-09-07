@@ -60,3 +60,39 @@ func TestChunkAndLocal_RoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestChunkCoordAt checks the streamer's entry point from a player's
+// floating-point position into chunk space, with particular attention to
+// negative coordinates: truncating toward zero instead of flooring would put
+// x=-0.5 in chunk 0 instead of chunk -1, silently desyncing the desired set
+// from where the player actually is the moment they cross the origin.
+func TestChunkCoordAt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		x, z  float32
+		wantX int
+		wantZ int
+	}{
+		{"origin", 0, 0, 0, 0},
+		{"interior of chunk 0", 7.5, 3.2, 0, 0},
+		{"just before the negative boundary", -0.001, 0, -1, 0},
+		{"first block of chunk -1", -16, 0, -1, 0},
+		{"last block of chunk -1", -0.5, -0.5, -1, -1},
+		{"deep negative on both axes", -33.2, -17.9, -3, -2},
+		{"first block of chunk 1", 16, 16, 1, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ChunkCoordAt(tt.x, tt.z)
+			want := ChunkCoord{X: tt.wantX, Z: tt.wantZ}
+			if got != want {
+				t.Errorf("ChunkCoordAt(%v, %v) = %+v, want %+v", tt.x, tt.z, got, want)
+			}
+		})
+	}
+}

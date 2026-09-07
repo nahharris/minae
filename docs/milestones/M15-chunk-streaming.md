@@ -1,6 +1,6 @@
 # M15 — Chunk streaming
 
-**Status:** 📋 Planned
+**Status:** ✅ Done
 **Depends on:** [M14](M14-async-chunk-pipeline.md)
 
 ## Objective
@@ -79,6 +79,121 @@ KB of light. 289 chunks is roughly 55 MB, which is acceptable but worth knowing
 before it surprises someone. Nibble-packing the two light arrays, deferred in
 M6, halves the light half and becomes worth revisiting here.
 
+## Design decisions
+
+Made before implementation, because each one is a place the obvious choice is
+wrong.
+
+### The streamer is separate from the pipeline
+
+`Pipeline` knows how to advance a chunk through stages. It does not know where
+the player is, and should not. A `Streamer` owns the desired set and drives the
+pipeline through `Request` and a new `Release`.
+
+That split is what makes the desired-set logic testable without workers: ring
+computation, hysteresis and ordering are pure functions of (player chunk,
+radii) and deserve tests that do not spin up goroutines.
+
+### `Release` must undo everything `Request` set up
+
+Unloading is the direction nobody tests, so its contract is written out in
+full. Releasing a coord must:
+
+- delete it from `World.Chunks`,
+- delete it from `stages` and `epoch`,
+- remove it from the pending `requested` queue if it never started,
+- bump its epoch first, so an in-flight mesh job's result is discarded,
+- and invalidate its neighbours' meshes, because their face culling assumed it
+  was there.
+
+Missing any one of these is a leak or a stale mesh, and only the first is
+likely to be noticed by hand.
+
+### A late generation result must be dropped, but no generation epoch is needed
+
+`drainGenerated` currently inserts unconditionally. After `Release` that would
+resurrect an unloaded chunk — a genuine leak, and the loaded set would silently
+stop matching the desired set.
+
+The fix is a wanted-check: drop a result whose coord is no longer in `stages`,
+or whose stage is no longer `Generating`.
+
+It is tempting to add a generation epoch alongside the mesh epoch. **It is not
+needed, and adding one would be cargo cult.** Consider the one sequence that
+looks dangerous: request, release, request again, and only then the first
+result arrives. The stage is `Generating` and the coord is known, so the result
+is accepted — and that is *correct*, because `Generator.Generate` is required
+to be a pure function of coord. The stale result and the one still in flight
+are the same chunk. Meshes need an epoch because a mesh depends on a mutable
+world; generation does not depend on anything mutable at all.
+
+### Hysteresis, and the counts that prove it
+
+Load radius is `view_distance`; unload radius is `view_distance + 2`, both in
+Chebyshev distance so the region is square and matches the chunk grid.
+
+A margin of one is not enough. One chunk of margin means a player stepping
+back and forth across a single boundary still sits exactly on the load edge,
+and rounding decides the outcome. Two gives the frontier somewhere to sit.
+
+The test must assert on **load and unload counts across an oscillation**, not
+on the final set — a thrashing implementation reaches the correct final state
+every time, which is exactly why asserting on state alone would pass.
+
+### The player is held, not dropped
+
+`world/collision.go` treats a missing chunk as empty, deliberately and for
+reasons documented there. That is the right call for collision and the wrong
+outcome for streaming: a player who outruns the loader falls into the void.
+
+The decision: **the player does not move while the chunk containing them is
+below `Generated`.** Position is not integrated and vertical velocity is
+zeroed, so they hold in place rather than accumulating fall speed that launches
+them downward the instant terrain appears.
+
+This is a visible hitch, and that is the honest trade. Falling through the
+world is unrecoverable; a stutter is not. On foot it cannot happen at all —
+walking speed is far below the loader — so this exists for teleports, for
+absurd-speed testing, and for a machine slow enough to matter.
+
+Note the interaction: zeroing vertical velocity is what the M12 test
+`RestingBodyDoesNotAccumulateFallSpeed` was written to protect. The same
+property is what makes holding safe here.
+
+### The frontier is already handled — but must be tested, not assumed
+
+M14 recorded that "all eight neighbours" cannot be read literally: an
+unrequested neighbour vacuously satisfies the stage gate. M14 was safe because
+nothing was ever requested after startup. **Streaming breaks that**, and it is
+worth being precise about why the existing machinery covers it:
+
+- **Geometry.** A frontier chunk is meshed against absent neighbours. When one
+  arrives, `invalidateNeighbourMeshesLocked` demotes the frontier chunk and
+  bumps its epoch. Already in place as of M14.
+- **Light.** A frontier chunk is lit as though its absent neighbours were solid
+  rock. When a neighbour arrives, `SeedChunk` runs an add-only propagation, and
+  `propagateAdd` is not clamped to the seeded chunk — it walks into any loaded
+  chunk. So light flows *back* into the frontier chunk where a path opened up,
+  `setLight` marks it dirty, and `demoteDirty` re-meshes it.
+
+That second one is the M14 note about `demoteDirty` being unobservable coming
+due: this is the milestone where it earns its place. The case that exercises it
+is a cave whose only route to the sky runs through a chunk that had not loaded
+yet — dark on arrival at the frontier, correctly lit once the neighbour lands.
+A test must construct exactly that, because nothing simpler distinguishes it.
+
+### Unloading leaves a stale seam, and that is accepted
+
+The reverse of arrival: unloading a chunk means its still-loaded neighbour was
+meshed with seam faces culled against blocks that are now gone, so you can see
+through into the void, and its light is now too bright for the same reason.
+
+`Release` invalidating neighbour meshes fixes the geometry. The light is left
+stale on purpose — recomputing it would mean a removal walk at the frontier
+every time a chunk unloads, which is real cost for a chunk sitting two rings
+beyond view distance. If it ever becomes visible, the fix is to shrink the
+gap between rendering and the unload radius, not to make unloading expensive.
+
 ## Validation criteria
 
 1. **The loaded set matches the desired set** after the player moves, in every
@@ -108,3 +223,94 @@ checklist.
 
 Terrain generation, level of detail for distant chunks, frustum culling,
 persistence to disk, and mesh compression.
+
+## Result
+
+The world follows the player. The fixed 3×3 grid is gone; `Streamer` owns the
+desired set and drives the pipeline through `Request` and a new `Release`,
+with `view_distance` defaulting to 8 — a 17×17 region, 289 chunks. Terrain is
+still the flat plane, as planned. `internal/chunks` is at 97.1%, total 59.7%.
+
+Every design decision above survived implementation unchanged. Two things did
+not, and both are recorded below rather than quietly fixed.
+
+### An epoch collision across unload and reload
+
+Found in review, not by a test. `Release` deletes the coord's epoch entry, and
+epochs were per-coord counters starting at 1 — so a chunk unloaded and
+re-loaded began counting again from 1, and its first mesh job drew exactly the
+epoch a job still in flight from the chunk's *previous* life was carrying.
+
+`drainMeshed` decides staleness with `stage != Meshing || epoch != res.epoch`.
+The re-requested chunk is legitimately `Meshing`, and now the epochs match, so
+the stale result is **accepted** — a mesh built against a neighbourhood the
+player has since walked away from and back to. Worse, accepting it marks the
+chunk `Meshed`, so the correct result arriving moments later is the one
+discarded.
+
+This is precisely the failure criterion 4 exists to prevent, and it was
+invisible while chunks were never released, which is why M14 could not have
+caught it.
+
+Epochs now come from one monotonic counter, `takeEpochLocked`, shared by every
+site that invalidates a mesh. A reused epoch becomes impossible by
+construction instead of by argument, and `Release` can still delete the entry —
+so the epoch map does not grow without bound over a long traverse, which
+criterion 8 would not have caught either.
+
+The regression test is white-box, and deliberately so. Reproducing the failure
+end-to-end needs a mesh job held in flight across a release, a re-request, a
+regeneration, a re-lighting and a second dispatch, with the stale result
+landing first. Nothing exported can hold a mesh worker at a chosen point, so a
+black-box version would depend on winning a race rather than on the bug being
+present. The test asserts the invariant in terms of `drainMeshed`'s own
+staleness expression, and states in its own comment what it does not cover.
+
+### Determinism leaks in the streamer
+
+`coordsToRelease` ranged over a map and `coordsToRequest` used an unstable
+sort, so both the request order among equidistant chunks and the released set
+handed back to the caller varied run to run. Neither changes the final loaded
+set, which is why the tests passed.
+
+That still matters here: `Update` returns the released slice for the caller to
+free GPU meshes with, so a caller could behave differently on identical input.
+Determinism regardless of ordering is a property this project has asserted
+since M14, and leaving a known source of it in place because nothing currently
+observes it is how the once-a-month bug gets written. Both are now ordered.
+
+### `demoteDirty` finally earns its place — but not where expected
+
+M14 recorded that `demoteDirty` could not be observed and predicted this
+milestone would make it load-bearing. That turned out to be **half right**, and
+the correction is worth keeping.
+
+The predicted scenario — a chunk arriving and lighting its neighbour through a
+seam — does not exercise it. `invalidateNeighbourMeshesLocked` fires from
+`drainGenerated` and demotes the already-meshed neighbour *before* its light
+could change, because the arriving chunk must itself reach `Lit` before the
+stage gate lets the neighbour re-mesh. Geometry invalidation structurally
+pre-empts light invalidation for every "new chunk arrives" case. Both were
+verified by mutation: disabling either one alone leaves the sealed-cave test
+passing, so they are genuine redundancy rather than a gap.
+
+What does pin `demoteDirty` down is a light change crossing a seam between two
+chunks that are *both already loaded* — no stage transition, so geometry
+invalidation never fires. That case has its own test, and it is the only one
+that fails when `demoteDirty` is disabled.
+
+### Coverage of the player-hold decision
+
+The mechanical half is tested: `stepBody` freezes position and zeroes vertical
+velocity when held, mutation-verified. The *decision* —
+`Stage(playerChunk) < Generated` in `app.go` — is not, because `Game` needs a
+live raylib context to construct. That matches the existing convention for
+`Player.Update` from M13, and it is a real gap rather than an acceptable one:
+the predicate could be inverted and no test would notice.
+
+One further limit worth naming: the hold tests the chunk containing the
+player's centre, while the player's AABB has width and can span two chunks at
+a boundary. A player held at a seam with one unloaded neighbour is approximated
+rather than handled exactly. It has no visible effect at walking speed and is
+the kind of thing that would matter to a teleport landing exactly on a chunk
+edge.

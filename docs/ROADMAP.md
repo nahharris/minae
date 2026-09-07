@@ -24,7 +24,7 @@ streaming, generation and biomes.
 | [M12](milestones/M12-collision-core.md) | Collision and gravity core | ✅ Done | Pure, GPU-free AABB resolver: gravity, jump, 0.6 step-up |
 | [M13](milestones/M13-player-controller.md) | Player controller | ✅ Done | Give the player a body; walking by default, flight as a toggle |
 | [M14](milestones/M14-async-chunk-pipeline.md) | Async chunk pipeline | ✅ Done | Generation and meshing off the main thread, behind a stage pipeline |
-| [M15](milestones/M15-chunk-streaming.md) | Chunk streaming | 📋 Planned | The world follows the player; the fixed 3×3 grid goes away |
+| [M15](milestones/M15-chunk-streaming.md) | Chunk streaming | ✅ Done | The world follows the player; the fixed 3×3 grid goes away |
 | [M16](milestones/M16-noise-foundation.md) | Noise foundation | 📋 Planned | Deterministic OpenSimplex2, fBm, domain warping, splines |
 | [M17](milestones/M17-plains-terrain.md) | Plains terrain | 📋 Planned | Real ground: continentalness, erosion, peaks-and-valleys through splines |
 | [M18](milestones/M18-vegetation-features.md) | Trees and bushes | 📋 Planned | The first features, and the first transparent block |

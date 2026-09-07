@@ -6,6 +6,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/internal/chunks"
 	render "github.com/nahharris/minae/internal/gfx"
+	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/platform/logging"
 	resources "github.com/nahharris/minae/internal/platform/resources"
 	"github.com/nahharris/minae/internal/player"
@@ -15,18 +16,45 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// pipelineBudget caps the chunk pipeline's work in a single Update call. It
-// is generous enough to finish the fixed 3x3 startup region in a handful of
-// frames; once that region is fully Meshed the pipeline has nothing left to
-// do each frame but a couple of cheap, empty channel checks, so there is no
-// ongoing cost to keeping the same budget for the life of the game. Dynamic
-// loading (M15) will need to revisit this once regions can grow.
+// pipelineBudget caps the chunk pipeline's work in a single Update call. At
+// the default view distance the streamer's desired set is up to 289 chunks,
+// so this budget is a steady trickle rather than something startup waits on
+// in one burst: at 9 chunks lit and meshed per frame, filling the whole
+// region from a standing start takes on the order of 30 frames -- under a
+// second at 60 FPS -- and every frame after that spends the budget on
+// whatever the player's movement has newly brought into range.
 var pipelineBudget = chunks.Budget{Light: 9, Mesh: 9}
 
-// fixedRegionRadius is the half-width, in chunks, of the fixed region loaded
-// at startup: a radius of 1 is the same 3x3 grid world.GenerateFixedGrid used
-// to build synchronously. Dynamic loading around the player is M15.
-const fixedRegionRadius = 1
+// unloadMargin is added to the load radius (config.GameConfig.ViewDistance)
+// to get the unload radius the Streamer uses. The M15 design decisions fix
+// this at 2: one chunk of margin still leaves a player oscillating across a
+// single boundary sitting exactly on the load edge, where floating point
+// rounding decides the outcome every frame; two gives the frontier somewhere
+// to sit instead of thrashing.
+const unloadMargin = 2
+
+// meshRemover is the subset of *render.SceneRenderer the unload path needs:
+// freeing the GPU mesh of a chunk that has left the streamer's desired set.
+// Factoring it out as an interface, rather than depending on SceneRenderer's
+// concrete type, is what makes releaseUnloaded testable without a live
+// raylib window -- a test double satisfies this trivially.
+type meshRemover interface {
+	RemoveMesh(coord world.ChunkCoord)
+}
+
+// releaseUnloaded frees the GPU mesh of every coord the streamer released
+// this call.
+//
+// Unloading is the direction M15 calls out as the one nobody tests: a mesh
+// leak here is silent and only shows up as memory climbing over a long
+// session. Pulling this one call out of Update's body is what lets a test
+// drive it directly against a fake renderer and count what it holds,
+// instead of trusting that RemoveMesh was called.
+func releaseUnloaded(renderer meshRemover, released []world.ChunkCoord) {
+	for _, coord := range released {
+		renderer.RemoveMesh(coord)
+	}
+}
 
 // Game manages the global game state and systems.
 type Game struct {
@@ -39,6 +67,7 @@ type Game struct {
 	UI       *ui.UIManager
 	Lighting *lighting.Engine
 	Pipeline *chunks.Pipeline
+	Streamer *chunks.Streamer
 
 	Log *logrus.Entry
 }
@@ -59,19 +88,20 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 	// generation and meshing.
 	pipeline := chunks.NewPipeline(w, lightEngine, chunks.FlatGenerator{}, res.Atlas, runtime.NumCPU())
 
-	// Request the same fixed 3x3 region world.GenerateFixedGrid used to build
-	// synchronously. It now appears over the first few frames as the
-	// pipeline generates, lights and meshes it off the main thread, instead
-	// of blocking startup until it is all done.
-	log.Info("Requesting startup chunks...")
-	for x := -fixedRegionRadius; x <= fixedRegionRadius; x++ {
-		for z := -fixedRegionRadius; z <= fixedRegionRadius; z++ {
-			pipeline.Request(world.ChunkCoord{X: x, Z: z})
-		}
-	}
-
 	// Initialize Player (Runtime wrapper around World.PlayerState)
 	p := player.NewPlayer(w.PlayerState)
+
+	// The streamer takes over from the fixed 3x3 startup region M14 used: it
+	// owns the desired set of loaded chunks around the player and drives the
+	// pipeline through Request and Release every frame (see Update). Priming
+	// it here, at the player's spawn position, means the region around spawn
+	// is already requested before the first frame runs rather than waiting
+	// for one Update to notice where the player is.
+	loadRadius := config.Current.ViewDistance
+	streamer := chunks.NewStreamer(pipeline, loadRadius, loadRadius+unloadMargin)
+	spawnChunk := world.ChunkCoordAt(p.Body.Position.X, p.Body.Position.Z)
+	log.WithField("chunk", spawnChunk).Info("Requesting startup chunks...")
+	streamer.Update(spawnChunk)
 
 	// Initialize Renderer
 	renderer := render.NewSceneRenderer(res)
@@ -88,6 +118,7 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 		UI:       u,
 		Lighting: lightEngine,
 		Pipeline: pipeline,
+		Streamer: streamer,
 		Log:      log,
 	}
 
@@ -113,9 +144,14 @@ func (g *Game) Update() {
 		}
 	}
 
-	// Advance the chunk pipeline and upload whatever it finished. This runs
-	// every frame regardless of pause state, so the world keeps streaming in
-	// even while the pause menu is up.
+	// Recompute the desired set around the player and drive the pipeline to
+	// match it, then advance the pipeline and upload whatever it finished.
+	// This runs every frame regardless of pause state, so the world keeps
+	// streaming in even while the pause menu is up.
+	playerChunk := world.ChunkCoordAt(g.Player.Body.Position.X, g.Player.Body.Position.Z)
+	released := g.Streamer.Update(playerChunk)
+	releaseUnloaded(g.Renderer, released)
+
 	for _, ready := range g.Pipeline.Update(pipelineBudget) {
 		g.Renderer.UploadChunkMesh(ready.Coord, ready.Data)
 	}
@@ -134,6 +170,15 @@ func (g *Game) Update() {
 
 		// Update Time
 		g.World.TimeOfDay.Update(dt)
+
+		// The player is held, not dropped (M15): if the chunk underneath the
+		// player's current position has not reached Generated yet -- an
+		// absurd-speed teleport can outrun the loader even though ordinary
+		// walking speed never will -- Update must not integrate position or
+		// let gravity accumulate fall speed. See player.Player.Held's doc
+		// comment; internal/physics itself stays entirely unaware of chunks
+		// or pipelines.
+		g.Player.Held = g.Pipeline.Stage(playerChunk) < chunks.Generated
 
 		// Update Player
 		g.Player.Update(dt, g.World)
@@ -261,10 +306,10 @@ func (g *Game) Unload() {
 // Every stale chunk is also reported to the pipeline via Invalidate. Editing
 // a block bypasses the pipeline entirely — this method rebuilds the mesh here
 // and now, synchronously — but the pipeline does not know that happened. If
-// it had a mesh job in flight for one of these chunks (only possible in the
-// first few frames, while the fixed startup region is still arriving),
-// Invalidate stops that job's now-stale result from later overwriting the
-// mesh built here with one that predates the edit.
+// it had a mesh job in flight for one of these chunks -- always possible now
+// that chunks stream in continuously rather than only during a fixed startup
+// window -- Invalidate stops that job's now-stale result from later
+// overwriting the mesh built here with one that predates the edit.
 func (g *Game) remeshAfterBlockChange(result world.InteractionResult) {
 	pos := result.ChangedBlock
 	g.Lighting.OnBlockChanged(pos[0], pos[1], pos[2])
