@@ -92,7 +92,7 @@ func TestPipeline_LateNeighbourLightsSealedCaveAndRemeshesIt(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
-			for _, r := range p.Update(chunks.Budget{Light: 64, Mesh: 64}) {
+			for _, r := range p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second}) {
 				latest[r.Coord] = r.Data
 			}
 			if until() {
@@ -173,7 +173,7 @@ func TestPipeline_DemoteDirtyReMeshesOnCrossSeamLightChangeAlone(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
-			for _, r := range p.Update(chunks.Budget{Light: 64, Mesh: 64}) {
+			for _, r := range p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second}) {
 				latest[r.Coord] = r.Data
 			}
 			if until() {

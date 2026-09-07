@@ -57,7 +57,7 @@ func TestPipeline_ReleaseDiscardsInFlightGeneration(t *testing.T) {
 	started := false
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && !started {
-		p.Update(chunks.Budget{Light: 8, Mesh: 8})
+		p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second})
 		select {
 		case got := <-gen.started:
 			if got != target {
@@ -90,7 +90,7 @@ func TestPipeline_ReleaseDiscardsInFlightGeneration(t *testing.T) {
 	// resurrect the coord into World.Chunks and Generated.
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Update(chunks.Budget{Light: 8, Mesh: 8})
+		p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second})
 		runtime.Gosched()
 	}
 
@@ -107,7 +107,7 @@ func TestPipeline_ReleaseDiscardsInFlightGeneration(t *testing.T) {
 	p.Request(target)
 	deadline = time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		p.Update(chunks.Budget{Light: 8, Mesh: 8})
+		p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second})
 		if p.Stage(target) >= chunks.Generated {
 			return
 		}
@@ -143,7 +143,7 @@ func TestPipeline_ReleaseDiscardsInFlightMesh(t *testing.T) {
 		p.Request(c)
 	}
 
-	budget := chunks.Budget{Light: 64, Mesh: 64}
+	budget := chunks.Budget{Light: time.Second, Mesh: time.Second}
 	sawMeshing := false
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {

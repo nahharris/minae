@@ -2,6 +2,7 @@ package chunks
 
 import (
 	"sync"
+	"time"
 
 	"github.com/nahharris/minae/internal/blocks"
 	"github.com/nahharris/minae/internal/gfx/mesh"
@@ -75,18 +76,35 @@ func (FlatGenerator) Generate(coord world.ChunkCoord) *world.Chunk {
 	return c
 }
 
-// Budget caps the work Update performs in a single call, so one frame can
-// never stall waiting on the pipeline. A zero Budget makes Update do no
-// lighting and return no meshes that call — generation and meshing already in
-// flight keep running regardless, and their results are picked up once a
-// non-zero budget is passed.
+// Budget caps the wall-clock time Update spends on lighting and on draining
+// finished meshes in a single call, so one frame can never stall waiting on
+// the pipeline. A zero (or negative) Budget makes Update do no lighting and
+// return no meshes that call — generation and meshing already in flight keep
+// running regardless, and their results are picked up once a positive budget
+// is passed.
+//
+// This replaced a count-based Budget (a maximum number of chunks per call)
+// after M15's performance follow-up: SeedChunk's cost turned out to depend
+// entirely on the terrain a chunk happens to contain, so a fixed count chosen
+// against cheap terrain silently stopped bounding anything once real relief
+// made some chunks far more expensive to light than others. A duration
+// adapts automatically — the worst case becomes a slower fill, not a stall.
+//
+// Both fields check the deadline only between whole units of work (one
+// chunk's SeedChunk call, one drained mesh result), never in the middle of
+// one, so a call can run slightly past its budget rather than being cut off
+// mid-chunk. To guarantee every call that gets a positive budget makes at
+// least some progress rather than occasionally doing nothing (which a
+// check-before-work loop could do if the deadline landed exactly on an
+// unlucky clock tick), the deadline is checked only after each unit
+// completes.
 type Budget struct {
-	// Light is the maximum number of chunks Update may seed with light this
-	// call.
-	Light int
-	// Mesh is the maximum number of finished meshes Update may return this
-	// call.
-	Mesh int
+	// Light is the maximum duration Update may spend seeding chunks with
+	// light this call.
+	Light time.Duration
+	// Mesh is the maximum duration Update may spend draining finished mesh
+	// results this call.
+	Mesh time.Duration
 }
 
 // Ready is a chunk mesh the pipeline has finished building, waiting to be
@@ -429,28 +447,36 @@ func (p *Pipeline) invalidateNeighbourMeshesLocked(coord world.ChunkCoord) {
 }
 
 // seedLit lights every Generated chunk whose eight requested neighbours have
-// all reached at least Generated, up to limit chunks. limit <= 0 lights
+// all reached at least Generated, until budget is spent. budget <= 0 lights
 // nothing this call.
-func (p *Pipeline) seedLit(limit int) {
-	if limit <= 0 {
+//
+// The deadline is checked after each chunk, not before: a coord that becomes
+// eligible is always lit at least once per call it is seen in, so a budget
+// smaller than a single chunk's cost still makes forward progress — one
+// chunk this call, its neighbours in later ones — rather than seeding nothing
+// forever. The tradeoff is that a call can finish slightly after its
+// deadline; that is the "few milliseconds, not exactly the deadline" this
+// budget is documented to mean.
+func (p *Pipeline) seedLit(budget time.Duration) {
+	if budget <= 0 {
 		return
 	}
+	deadline := time.Now().Add(budget)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	lit := 0
 	for coord, stage := range p.stages {
-		if lit >= limit {
-			return
-		}
 		if stage != Generated || !p.neighborsAtLeastLocked(coord, Generated) {
 			continue
 		}
 
 		p.light.SeedChunk(coord)
 		p.stages[coord] = Lit
-		lit++
+
+		if !time.Now().Before(deadline) {
+			return
+		}
 	}
 }
 
@@ -530,23 +556,29 @@ func (p *Pipeline) dispatchMeshing() {
 	}
 }
 
-// drainMeshed collects up to limit finished mesh jobs, releasing each
-// snapshot and marking the chunk Meshed. limit <= 0 returns nothing this
-// call, though the results already sitting in the channel are not lost — they
-// are picked up by a later call with a positive budget.
+// drainMeshed collects finished mesh jobs until budget is spent or the
+// results channel is empty, releasing each snapshot and marking the chunk
+// Meshed. budget <= 0 returns nothing this call, though the results already
+// sitting in the channel are not lost — they are picked up by a later call
+// with a positive budget.
+//
+// Like seedLit, the deadline is checked after each result rather than
+// before, so a call always drains at least one result when one is already
+// waiting and the budget is positive.
 //
 // A result is discarded, its snapshot still released, when the chunk it
 // belongs to is no longer Meshing at the epoch the job was dispatched at.
 // That is demoteDirty's doing: a chunk demoted back to Lit while its old mesh
 // job was still running would otherwise have that stale job overwrite the
 // fresh one queued after it.
-func (p *Pipeline) drainMeshed(limit int) []Ready {
-	if limit <= 0 {
+func (p *Pipeline) drainMeshed(budget time.Duration) []Ready {
+	if budget <= 0 {
 		return nil
 	}
+	deadline := time.Now().Add(budget)
 
-	ready := make([]Ready, 0, limit)
-	for len(ready) < limit {
+	var ready []Ready
+	for {
 		select {
 		case res := <-p.meshResults:
 			res.snapshot.Release()
@@ -561,11 +593,14 @@ func (p *Pipeline) drainMeshed(limit int) []Ready {
 			if !stale {
 				ready = append(ready, Ready{Coord: res.coord, Data: res.data})
 			}
+
+			if !time.Now().Before(deadline) {
+				return ready
+			}
 		default:
 			return ready
 		}
 	}
-	return ready
 }
 
 // dispatchGenerating sends every Absent chunk still waiting in the request

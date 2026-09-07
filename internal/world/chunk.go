@@ -13,15 +13,72 @@ type Chunk struct {
 	SkyLight   [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	BlockLight [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	X, Z       int // Chunk coordinates in the world grid (not world position)
+
+	// highestSolidY is the Y of the highest non-air block anywhere in the
+	// chunk, or -1 if the chunk is entirely air. It is a single scalar for
+	// the whole chunk, not per column: lighting's column-scan ceiling
+	// optimization (see lighting.seedSkyLight) only needs "how high does
+	// this chunk's terrain reach at most", not a per-column height map.
+	//
+	// It is maintained incrementally by SetBlock/SetBlockState rather than
+	// scanned on demand, since SeedChunk reads it on the hot chunk-loading
+	// path. Raising it is O(1); lowering it (only possible by removing the
+	// single highest block in the whole chunk) rescans, which is rare enough
+	// in practice not to matter.
+	highestSolidY int
 }
 
 // NewChunk creates a new Chunk at the specified grid coordinates.
 func NewChunk(x, z int) *Chunk {
 	c := &Chunk{
-		X: x,
-		Z: z,
+		X:             x,
+		Z:             z,
+		highestSolidY: -1,
 	}
 	return c
+}
+
+// HighestSolidY returns the Y of the highest non-air block in the chunk, or
+// -1 if the chunk is entirely air.
+func (c *Chunk) HighestSolidY() int {
+	return c.highestSolidY
+}
+
+// noteBlockChange updates highestSolidY after a block at height y changed
+// from wasSolid to isSolid.
+func (c *Chunk) noteBlockChange(y int, wasSolid, isSolid bool) {
+	if isSolid == wasSolid {
+		return
+	}
+	if isSolid {
+		if y > c.highestSolidY {
+			c.highestSolidY = y
+		}
+		return
+	}
+	// A solid block was removed. Only the chunk-wide maximum can be affected,
+	// and only if the removed block was sitting at it.
+	if y == c.highestSolidY {
+		c.recomputeHighestSolidBelow(y)
+	}
+}
+
+// recomputeHighestSolidBelow scans downward from from (inclusive) for the new
+// chunk-wide highest solid block, after the block that used to sit at from
+// was removed. from itself must still be checked, not skipped: another
+// column can hold a solid block at that same Y, and removing one block does
+// not clear the whole layer.
+func (c *Chunk) recomputeHighestSolidBelow(from int) {
+	for y := from; y >= 0; y-- {
+		base := y * config.ChunkWidth * config.ChunkWidth
+		for i := range config.ChunkWidth * config.ChunkWidth {
+			if c.Blocks[base+i] != blocks.InvalidNumericID {
+				c.highestSolidY = y
+				return
+			}
+		}
+	}
+	c.highestSolidY = -1
 }
 
 // ChunkX returns the X coordinate of the chunk.
@@ -84,9 +141,11 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
+	wasSolid := c.Blocks[index] != blocks.InvalidNumericID
 	c.Blocks[index] = blocks.NumericIDOf(block)
 	// Reset meta for convenience. Per-instance meta should be set via SetBlockState.
 	c.Meta[index] = 0
+	c.noteBlockChange(y, wasSolid, block != nil)
 	return true
 }
 
@@ -112,8 +171,10 @@ func (c *Chunk) SetBlockState(x, y, z int, block *blocks.Block, meta uint8) bool
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
+	wasSolid := c.Blocks[index] != blocks.InvalidNumericID
 	id := blocks.NumericIDOf(block)
 	c.Blocks[index] = id
+	c.noteBlockChange(y, wasSolid, id != blocks.InvalidNumericID)
 	if id == blocks.InvalidNumericID {
 		c.Meta[index] = 0
 		return true

@@ -184,7 +184,7 @@ func TestStreamer_UpdateNeverBlocks(t *testing.T) {
 	const budget = 200 * time.Millisecond
 	start := time.Now()
 	s.Update(world.ChunkCoord{})
-	p.Update(chunks.Budget{Light: 9, Mesh: 9})
+	p.Update(chunks.Budget{Light: time.Second, Mesh: time.Second})
 	elapsed := time.Since(start)
 
 	if elapsed > budget {

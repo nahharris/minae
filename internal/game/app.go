@@ -2,6 +2,7 @@ package game
 
 import (
 	"runtime"
+	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/nahharris/minae/internal/chunks"
@@ -17,14 +18,27 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// pipelineBudget caps the chunk pipeline's work in a single Update call. At
-// the default view distance the streamer's desired set is up to 289 chunks,
-// so this budget is a steady trickle rather than something startup waits on
-// in one burst: at 9 chunks lit and meshed per frame, filling the whole
-// region from a standing start takes on the order of 30 frames -- under a
-// second at 60 FPS -- and every frame after that spends the budget on
-// whatever the player's movement has newly brought into range.
-var pipelineBudget = chunks.Budget{Light: 9, Mesh: 9}
+// pipelineBudget caps the chunk pipeline's wall-clock work in a single
+// Update call, replacing the fixed "9 chunks" count M14/M15 chose against
+// FlatGenerator's uniform terrain. That count stopped meaning anything once
+// M17 gave chunks real relief: SeedChunk's cost against real terrain measured
+// at 103ms/chunk in the running pipeline, one order of magnitude past a
+// frame budget, driven by map lookups the M15 follow-up's three changes then
+// removed from the hot path (see docs/milestones/M15-chunk-streaming.md's
+// "Follow-up" section). BenchmarkSeedChunk, isolated from the rest of the
+// pipeline, measured roughly 3ms/chunk after that fix — comfortably inside
+// 4ms with margin for a chunk whose neighbours are not yet lit, which does
+// more cross-seam enqueueing than the benchmark's steady-state case. Mesh
+// draining is per-item channel receives, not real CPU work — 2ms is
+// generous headroom for a burst of finished results without letting either
+// budget dominate a 16ms frame at 60 FPS.
+//
+// At the default view distance the streamer's desired set is up to 289
+// chunks, so this budget is a steady trickle rather than something startup
+// waits on in one burst, exactly as before — only the unit changed from a
+// chunk count to a duration, so a slower machine or a more expensive chunk
+// degrades to a slower fill instead of a stalled frame.
+var pipelineBudget = chunks.Budget{Light: 4 * time.Millisecond, Mesh: 2 * time.Millisecond}
 
 // unloadMargin is added to the load radius (config.GameConfig.ViewDistance)
 // to get the unload radius the Streamer uses. The M15 design decisions fix

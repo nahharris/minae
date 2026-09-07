@@ -17,4 +17,5 @@
 # 2026-09-07  M15 59.0  (measured 59.7; chunk streaming. internal/chunks at 97.1%)
 # 2026-09-07  M16 61.0  (measured 62.1; noise foundation, a new pure-stdlib package. internal/noise at 98.7%)
 # 2026-09-07  M17 62.0  (measured 62.5; plains terrain. internal/worldgen at 86.8%)
-62.0
+# 2026-09-07  perf 63.0  (measured 63.3; streaming-perf fix. world/lighting at 95.2%, chunks at 97.5%)
+63.0
