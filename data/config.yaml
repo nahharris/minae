@@ -8,3 +8,4 @@ mouse_sens: 0.003
 player_arm_length: 5
 day_cycle_duration: 600
 view_distance: 8
+world_seed: 1337

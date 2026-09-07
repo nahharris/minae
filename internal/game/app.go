@@ -13,6 +13,7 @@ import (
 	ui "github.com/nahharris/minae/internal/ui/game"
 	"github.com/nahharris/minae/internal/world"
 	"github.com/nahharris/minae/internal/world/lighting"
+	"github.com/nahharris/minae/internal/worldgen"
 	"github.com/sirupsen/logrus"
 )
 
@@ -83,10 +84,27 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 
 	lightEngine := lighting.NewEngine(w)
 
+	// M17 replaces the flat plane with generated plains, seeded from config
+	// so the same saved seed always reproduces the same world (see
+	// worldgen.Generator's determinism guarantee). chunks.FlatGenerator
+	// stays -- it is the fixture most of the existing chunk and lighting
+	// tests are built on -- but the running game uses real terrain now.
+	gen := worldgen.NewGenerator(config.Current.WorldSeed)
+
 	// workers is left at NewPipeline's discretion beyond "more than zero";
 	// NumCPU is a reasonable default for a pool that does both CPU-bound
 	// generation and meshing.
-	pipeline := chunks.NewPipeline(w, lightEngine, chunks.FlatGenerator{}, res.Atlas, runtime.NumCPU())
+	pipeline := chunks.NewPipeline(w, lightEngine, gen, res.Atlas, runtime.NumCPU())
+
+	// Spawn on the surface at column (0, 0), derived from SurfaceHeight
+	// rather than the old hardcoded (0, 40, 0): against generated terrain a
+	// fixed y spawns inside a hill or far above one. SurfaceHeight needs no
+	// chunk to be Generated first (see its doc comment), which sidesteps
+	// M15's player-hold entirely instead of requiring the spawn chunk to
+	// have already arrived by the time Update runs.
+	const spawnX, spawnZ = 0, 0
+	spawnY := gen.SurfaceHeight(spawnX, spawnZ)
+	w.PlayerState.Position = [3]float32{spawnX, float32(spawnY), spawnZ}
 
 	// Initialize Player (Runtime wrapper around World.PlayerState)
 	p := player.NewPlayer(w.PlayerState)

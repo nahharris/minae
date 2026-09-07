@@ -31,6 +31,12 @@ type GameConfig struct {
 	// configured separately, so the hysteresis margin cannot be
 	// misconfigured to less than the two chunks it needs.
 	ViewDistance int `yaml:"view_distance"`
+	// WorldSeed is the seed internal/worldgen.NewGenerator derives every
+	// noise field from (M17). The same seed always produces the same
+	// terrain (see worldgen.Generator's determinism guarantee); changing it
+	// changes the world entirely, so it is a saved config value rather than
+	// re-randomized on every launch.
+	WorldSeed int64 `yaml:"world_seed"`
 }
 
 // DefaultConfig provides sensible defaults
@@ -46,6 +52,7 @@ func DefaultConfig() GameConfig {
 		PlayerArmLength:  5.0,
 		DayCycleDuration: 600.0,
 		ViewDistance:     8,
+		WorldSeed:        1337,
 	}
 }
 
