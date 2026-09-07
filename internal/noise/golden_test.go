@@ -63,8 +63,11 @@ func goldenCases() []goldenCase {
 	for i := 0; i < 40; i++ {
 		cases = append(cases, goldenCase{
 			seed: rng.Int63()%2_000_000 - 1_000_000,
-			x:    rng.Float64()*4000 - 2000,
-			y:    rng.Float64()*4000 - 2000,
+			// madd, not rng.Float64()*4000 - 2000: that shape fuses on arm64
+			// and not amd64, so regenerating the file on a different machine
+			// would silently change which coordinates are frozen.
+			x: madd(rng.Float64(), 4000, -2000),
+			y: madd(rng.Float64(), 4000, -2000),
 		})
 	}
 	return cases
@@ -91,19 +94,24 @@ func TestGoldenVectors(t *testing.T) {
 		writeGolden(t, cases)
 	}
 
-	want := readGolden(t)
-	if len(want) != len(cases) {
+	rows := readGolden(t)
+	if len(rows) != len(cases) {
 		t.Fatalf("%s has %d rows, but goldenCases() defines %d cases; regenerate with -update-golden after changing the case table",
-			goldenPath, len(want), len(cases))
+			goldenPath, len(rows), len(cases))
 	}
 
-	for i, c := range cases {
-		got := NewSeed(c.seed).Eval2D(c.x, c.y)
-		if got != want[i] {
-			t.Errorf("case %d: Seed(%d).Eval2D(%v, %v) = %v, want %v (from %s)\n\n"+
+	// Every input comes from the file, never from goldenCases(). The case
+	// table decides what to freeze; once frozen, the file is the only
+	// authority on both halves. See goldenRow for the arm64 failure that
+	// distinction was learned from.
+	for i, row := range rows {
+		got := NewSeed(row.seed).Eval2D(row.x, row.y)
+		if got != row.value {
+			t.Errorf("case %d: Seed(%d).Eval2D(%s, %s) = %s, want %s (from %s)\n\n"+
 				"If this change is deliberate, regenerate the golden file with:\n"+
 				"  go test ./internal/noise/ -run TestGoldenVectors -update-golden",
-				i, c.seed, c.x, c.y, got, want[i], goldenPath)
+				i, row.seed, formatFloat(row.x), formatFloat(row.y),
+				formatFloat(got), formatFloat(row.value), goldenPath)
 		}
 	}
 }
@@ -139,11 +147,28 @@ func writeGolden(t *testing.T, cases []goldenCase) {
 	}
 }
 
-// readGolden reads the frozen values back, in row order, skipping the
-// header. It fails the test (rather than the whole package) if the file is
-// missing, since a missing golden file is a setup mistake, not a build
-// break.
-func readGolden(t *testing.T) []float64 {
+// goldenRow is one fully-specified frozen case: the inputs AND the value.
+//
+// Reading the inputs back, rather than recomputing them, is the whole point.
+// This test used to regenerate its coordinates from a seeded RNG and compare
+// only the value column -- and the arm64 CI job failed, because the
+// generator expression rng.Float64()*4000 - 2000 is itself a multiply
+// feeding a subtract, which arm64 fuses and amd64 does not. The inputs
+// differed, so of course the outputs did. Every fixed case passed and every
+// generated one failed, which is exactly the shape that finding leaves.
+//
+// A golden file whose inputs are recomputed is only frozen on the machine
+// that wrote it. The file has to carry both halves.
+type goldenRow struct {
+	seed  int64
+	x, y  float64
+	value float64
+}
+
+// readGolden reads the frozen rows back, in file order, skipping the header.
+// It fails the test (rather than the whole package) if the file is missing,
+// since a missing golden file is a setup mistake, not a build break.
+func readGolden(t *testing.T) []goldenRow {
 	t.Helper()
 
 	f, err := os.Open(goldenPath)
@@ -161,15 +186,26 @@ func readGolden(t *testing.T) []float64 {
 		t.Fatalf("%s is empty", goldenPath)
 	}
 
-	values := make([]float64, 0, len(rows)-1)
+	out := make([]goldenRow, 0, len(rows)-1)
 	for _, row := range rows[1:] {
-		v, err := strconv.ParseFloat(row[3], 64)
-		if err != nil {
-			t.Fatalf("parsing value column in %s row %v: %v", goldenPath, row, err)
+		if len(row) != 4 {
+			t.Fatalf("%s row %v has %d columns, want 4", goldenPath, row, len(row))
 		}
-		values = append(values, v)
+		seed, err := strconv.ParseInt(row[0], 10, 64)
+		if err != nil {
+			t.Fatalf("parsing seed column in %s row %v: %v", goldenPath, row, err)
+		}
+		var parsed [3]float64
+		for i, col := range row[1:] {
+			v, err := strconv.ParseFloat(col, 64)
+			if err != nil {
+				t.Fatalf("parsing column %d in %s row %v: %v", i+1, goldenPath, row, err)
+			}
+			parsed[i] = v
+		}
+		out = append(out, goldenRow{seed: seed, x: parsed[0], y: parsed[1], value: parsed[2]})
 	}
-	return values
+	return out
 }
 
 // formatFloat writes v with enough digits (17 significant decimal digits) to

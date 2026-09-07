@@ -258,3 +258,63 @@ global rather than chunk-local coordinates, and that caller does not exist
 until M17. The test carries a negative control proving the comparison
 mechanism works, and says this in its own comments rather than implying
 coverage it does not have.
+
+## The arm64 job failed on its first run, and it was right to
+
+Both of the following were found by that job. Neither was findable on amd64,
+and both were shipped in the first version of this milestone.
+
+### `float64(a*b) + c` does not prevent fusion
+
+The mitigation this milestone was designed around does not work.
+
+The Go spec says an explicit floating-point conversion "rounds to the
+precision of the target type, preventing fusion that would discard that
+rounding", which reads like a licence to write `float64(a*b) + c` and be safe.
+It is not. For float64 to float64 the conversion changes no value, so the
+compiler drops it before the fused-multiply-add rewrite runs. `madd` compiled
+to a single `FMADDD` on arm64 regardless, and `madd` is used by fBm, domain
+warping and splines.
+
+`Eval2D` escaped, and only by luck worth recording: its one multiply feeds two
+separate additions, so the compiler had to materialise the product anyway.
+Relying on that is relying on a register allocator.
+
+**The fix inverts the goal.** "Never fuse" is not expressible in Go; "always
+fuse" is, because `math.FMA` is *defined* as the exactly rounded fused result.
+Every architecture computes the same bits, hardware instruction or software
+fallback. Determinism stops depending on defeating an optimiser and starts
+depending on an operation that is specified.
+
+`TestNoUnintendedFusedOperations` now compiles the package for arm64 and
+asserts that every fused instruction in the output is attributed to a source
+line in `fma.go` — inlining preserves the attribution, so a fused operation
+anywhere else is named precisely. It runs on any host, needs no arm64
+hardware, and has a control test proving a bare `a*b + c` really does fuse, so
+the guard cannot go quietly vacuous.
+
+That guard is the durable outcome here. The arm64 CI job verifies the real
+toolchain end to end and is worth keeping, but a property only checkable in CI
+is a property nobody checks while writing code.
+
+### A golden file whose inputs are recomputed is not frozen
+
+The actual CI failure was not in the noise at all. The golden test read only
+the value column from `testdata/golden.csv` and regenerated its coordinates
+from a seeded RNG — and the generator expression was
+`rng.Float64()*4000 - 2000`, a multiply feeding a subtract, which arm64 fuses.
+The *inputs* differed between architectures, so of course the outputs did.
+
+The evidence was in the failure pattern and was misread at first: all thirteen
+fixed cases passed and all forty generated ones failed. That is not what a
+broken noise function looks like.
+
+The file now carries both halves, and the test reads inputs from it and never
+from the case table. The case table decides what to freeze; once frozen, the
+file is the only authority. The generator uses `madd` too, so regenerating on
+a different machine cannot silently change which coordinates are frozen.
+
+Failure messages now print all seventeen significant digits rather than Go's
+shortest representation — the shortest form is what made the first diagnosis
+of this take a wrong turn, since the printed coordinate did not parse back to
+the coordinate in the file.
