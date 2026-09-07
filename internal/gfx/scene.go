@@ -92,24 +92,38 @@ func (r *SceneRenderer) UpdateMesh(chunk mesh.ChunkReader, w mesh.WorldReader) {
 	data := mesh.GenerateChunkMeshData(chunk, w, r.Atlas)
 
 	coord := world.ChunkCoord{X: chunk.ChunkX(), Z: chunk.ChunkZ()}
+	r.UploadChunkMesh(coord, data)
+}
 
+// UploadChunkMesh uploads already-built mesh data for coord, replacing
+// whatever mesh was there before. Unlike UpdateMesh, it does not generate the
+// mesh data itself: it exists for the async chunk pipeline, which builds
+// ChunkMeshData on a worker and hands it back for upload, since that step is
+// GPU work and must run on the main thread.
+//
+// data may be nil, for a chunk with no visible faces; the old mesh is still
+// unloaded in that case, since a chunk that used to have geometry may not
+// anymore (e.g. after being re-meshed with corrected light).
+func (r *SceneRenderer) UploadChunkMesh(coord world.ChunkCoord, data *mesh.ChunkMeshData) {
 	// Unload old mesh if it exists
 	if oldMesh, ok := r.ChunkMeshes[coord]; ok {
 		rl.UnloadMesh(oldMesh)
 		delete(r.ChunkMeshes, coord)
 	}
 
-	if data != nil {
-		// Upload to GPU
-		newMesh := data.Upload()
-		if newMesh != nil {
-			r.ChunkMeshes[coord] = newMesh
-			r.Log.WithFields(logrus.Fields{
-				"chunk_x":  chunk.ChunkX(),
-				"chunk_z":  chunk.ChunkZ(),
-				"vertices": len(data.Vertices) / 3,
-			}).Debug("Updated chunk mesh")
-		}
+	if data == nil {
+		return
+	}
+
+	// Upload to GPU
+	newMesh := data.Upload()
+	if newMesh != nil {
+		r.ChunkMeshes[coord] = newMesh
+		r.Log.WithFields(logrus.Fields{
+			"chunk_x":  coord.X,
+			"chunk_z":  coord.Z,
+			"vertices": len(data.Vertices) / 3,
+		}).Debug("Updated chunk mesh")
 	}
 }
 

@@ -13,4 +13,5 @@
 # 2026-09-05  M12 47.0  (measured 47.3; internal/physics at 91.3%)
 # 2026-09-05  M13 53.0  (measured 53.8; internal/player 0% -> 57.5%)
 # 2026-09-06  M14 55.0  (measured 56.1; SeedChunk + chunk snapshot, chunks at 100%)
-55.0
+# 2026-09-06  M14 58.0  (measured 58.4; async pipeline. internal/chunks at 96%)
+58.0
