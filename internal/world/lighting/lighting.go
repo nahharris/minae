@@ -295,6 +295,161 @@ func (e *Engine) updateBlockLight(x, y, z int, block *blocks.Block) {
 	e.propagateAdd(blockKind)
 }
 
+// SeedChunk lights a chunk that has just been added to the world, and lets
+// light flow between it and its already-lit neighbours.
+//
+// M3 deleted the previous SeedChunk because it was order-dependent: it wiped
+// its own chunk before reseeding from neighbour borders, so seeding chunk B
+// destroyed light chunk A had already pushed into it, and recovery depended
+// on which chunk was seeded next - in Go, map iteration order.
+//
+// This version has no wipe, and that is not a simplification so much as the
+// whole argument for why it is safe to bring back. Adding a chunk can only
+// ever add light, never remove it: World.GetSkyLight's doc comment spells out
+// that an unloaded chunk reads as opaque, so before this chunk arrived its
+// neighbours were necessarily lit as though every cell in it were solid rock.
+// Air appearing where the engine had assumed rock can only open new paths for
+// light that is already there - it can never invalidate a value the
+// neighbours already hold, because that value never depended on this chunk in
+// the first place. So there is nothing to remove, nothing to wipe, and an
+// add-only propagation converges to the same answer no matter which chunk in
+// a batch is seeded first. That is precisely the property the old
+// implementation lacked.
+//
+// SeedChunk seeds the new chunk's own skylight column scan and emitting
+// blocks exactly as RecomputeAll does, enqueues every already-lit cell on a
+// loaded neighbour's border that faces this chunk, and runs the ordinary add
+// walk. It is a no-op if coord is not loaded.
+func (e *Engine) SeedChunk(coord world.ChunkCoord) {
+	chunk := e.w.GetChunk(coord.X, coord.Z)
+	if chunk == nil {
+		return
+	}
+
+	e.seedSkyLight(coord, chunk)
+	e.seedBlockLight(coord, chunk)
+}
+
+// seedSkyLight is the skylight half of SeedChunk: a top-down column scan of
+// the new chunk identical to RecomputeAll's, plus every already-lit skylight
+// cell on a neighbouring chunk's border that can still shed light across the
+// seam, then one propagation.
+func (e *Engine) seedSkyLight(coord world.ChunkCoord, chunk *world.Chunk) {
+	e.addQueue = e.addQueue[:0]
+
+	baseX := coord.X * config.ChunkWidth
+	baseZ := coord.Z * config.ChunkWidth
+
+	for lx := range config.ChunkWidth {
+		for lz := range config.ChunkWidth {
+			x := baseX + lx
+			z := baseZ + lz
+
+			// Walk down only as far as the first opaque block, exactly like
+			// RecomputeAll: everything below it is shaded and already 0 in a
+			// fresh chunk.
+			for y := config.ChunkHeight - 1; y >= 0; y-- {
+				if !isTransparent(chunk.GetBlock(lx, y, lz)) {
+					break
+				}
+				e.setLight(skyKind, x, y, z, MaxSkyLight)
+				e.addQueue = append(e.addQueue, lightNode{x, y, z, MaxSkyLight})
+			}
+		}
+	}
+
+	e.enqueueNeighbourBorders(coord, skyKind)
+	e.propagateAdd(skyKind)
+}
+
+// seedBlockLight is the block-light half of SeedChunk: a full-volume scan of
+// the new chunk for emitting blocks identical to RecomputeAll's, plus every
+// already-lit block-light cell on a neighbouring chunk's border that can
+// still shed light across the seam, then one propagation.
+func (e *Engine) seedBlockLight(coord world.ChunkCoord, chunk *world.Chunk) {
+	e.addQueue = e.addQueue[:0]
+
+	baseX := coord.X * config.ChunkWidth
+	baseZ := coord.Z * config.ChunkWidth
+
+	// Unlike the skylight scan, an emitter can sit anywhere in the column, so
+	// the whole volume has to be visited.
+	for lx := range config.ChunkWidth {
+		for lz := range config.ChunkWidth {
+			for y := range config.ChunkHeight {
+				blk := chunk.GetBlock(lx, y, lz)
+				if blk == nil || blk.LightLevel == 0 {
+					continue
+				}
+
+				x := baseX + lx
+				z := baseZ + lz
+				e.setLight(blockKind, x, y, z, blk.LightLevel)
+				e.addQueue = append(e.addQueue, lightNode{x, y, z, blk.LightLevel})
+			}
+		}
+	}
+
+	e.enqueueNeighbourBorders(coord, blockKind)
+	e.propagateAdd(blockKind)
+}
+
+// enqueueNeighbourBorders appends, for every already-loaded chunk that
+// borders coord, the cells on its edge facing coord whose light of the given
+// kind can still cross the seam into the new chunk. Chunks are neighbours
+// only in the four horizontal directions, so the two vertical entries in
+// directions are skipped.
+//
+// A cell is worth enqueuing only if kind.expected reports a non-zero level
+// for the step back into the new chunk. That excludes an unlit border cell
+// for free - decayByOne(0) is 0 - and also a cell too dim to survive one more
+// step, which would only write a 0 into a new chunk that already reads 0
+// everywhere. propagateAdd would discard such a node on its first iteration
+// anyway; filtering here just means the walk never has to look at it.
+func (e *Engine) enqueueNeighbourBorders(coord world.ChunkCoord, kind lightKind) {
+	baseX := coord.X * config.ChunkWidth
+	baseZ := coord.Z * config.ChunkWidth
+
+	for _, d := range directions {
+		if d.DY != 0 {
+			continue
+		}
+		if e.w.GetChunk(coord.X+d.DX, coord.Z+d.DZ) == nil {
+			continue
+		}
+
+		// into is the direction light travels crossing the seam from the
+		// neighbour's border cell back into the new chunk - the reverse of d,
+		// which points from the new chunk out to the neighbour.
+		into := direction{DX: -d.DX, DY: -d.DY, DZ: -d.DZ}
+
+		for a := range config.ChunkWidth {
+			var x, z int
+			switch {
+			case d.DX == 1:
+				x, z = baseX+config.ChunkWidth-1, baseZ+a
+			case d.DX == -1:
+				x, z = baseX, baseZ+a
+			case d.DZ == 1:
+				x, z = baseX+a, baseZ+config.ChunkWidth-1
+			default: // d.DZ == -1
+				x, z = baseX+a, baseZ
+			}
+
+			// The neighbour's cell just across the seam from (x, z).
+			nx, nz := x+d.DX, z+d.DZ
+
+			for y := range config.ChunkHeight {
+				level := kind.get(e.w, nx, y, nz)
+				if kind.expected(level, into) == 0 {
+					continue
+				}
+				e.addQueue = append(e.addQueue, lightNode{nx, y, nz, level})
+			}
+		}
+	}
+}
+
 // DirtyChunks returns the chunks whose meshes the light changes since the last
 // call have invalidated, and clears the set.
 //
