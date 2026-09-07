@@ -47,3 +47,30 @@ jobs:
       # headers the build does.
       - name: Lint
         run: mise exec -- golangci-lint run
+
+  noise-arm64:
+    name: internal/noise (arm64)
+    # This job exists to verify one specific claim, not to re-run the whole
+    # suite on a second architecture: Go emits fused-multiply-add on arm64
+    # and does not on amd64, so the same golden vectors (see
+    # internal/noise/golden_test.go) can pass on build-test above and still
+    # be wrong here if any accumulation in the package ever loses one of its
+    # explicit float64(...) roundings. Without this job, that guarantee is
+    # just a comment -- see the "Floating-point fusion breaks determinism"
+    # design decision in docs/milestones/M16-noise-foundation.md.
+    #
+    # The repository is public, so ubuntu-24.04-arm runners are free.
+    # Scoped to internal/noise rather than the whole module: internal/noise
+    # is the only package this job needs to check, and building the rest of
+    # the module would drag in raylib's cgo build on a runner architecture
+    # it exists on this project purely to double-check, not to support.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/go-env
+
+      - name: Build internal/noise
+        run: mise exec -- go build ./internal/noise/...
+
+      - name: Test internal/noise
+        run: mise exec -- go test -race -v ./internal/noise/...
