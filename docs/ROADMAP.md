@@ -8,7 +8,8 @@ The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
 The lighting backlog is finished (M1-M7 done, M8 skipped). M12 landed the physics
-core and M13 wired it to the player: walking under gravity is now the default.
+core and M13 wired it to the player. Next is the world itself: M14-M19 cover
+streaming, generation and biomes.
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -22,6 +23,12 @@ core and M13 wired it to the player: walking under gravity is now the default.
 | [M8](milestones/M8-sun-tint.md) | Gentle directional sun tint | ⏭️ Skipped | Declined: reintroduces the bug class M4 fixed, for an effect nobody asked to see |
 | [M12](milestones/M12-collision-core.md) | Collision and gravity core | ✅ Done | Pure, GPU-free AABB resolver: gravity, jump, 0.6 step-up |
 | [M13](milestones/M13-player-controller.md) | Player controller | ✅ Done | Give the player a body; walking by default, flight as a toggle |
+| [M14](milestones/M14-async-chunk-pipeline.md) | Async chunk pipeline | 📋 Planned | Generation and meshing off the main thread, behind a stage pipeline |
+| [M15](milestones/M15-chunk-streaming.md) | Chunk streaming | 📋 Planned | The world follows the player; the fixed 3×3 grid goes away |
+| [M16](milestones/M16-noise-foundation.md) | Noise foundation | 📋 Planned | Deterministic OpenSimplex2, fBm, domain warping, splines |
+| [M17](milestones/M17-plains-terrain.md) | Plains terrain | 📋 Planned | Real ground: continentalness, erosion, peaks-and-valleys through splines |
+| [M18](milestones/M18-vegetation-features.md) | Trees and bushes | 📋 Planned | The first features, and the first transparent block |
+| [M19](milestones/M19-data-driven-biomes.md) | Data-driven biomes | 📋 Planned | Multi-noise parameter space including mysticness; 3D density |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done · ⏭️ Skipped
 
@@ -42,8 +49,10 @@ would make the game most playable soonest.
 - Player collision and gravity: done in [M12](milestones/M12-collision-core.md) and
   [M13](milestones/M13-player-controller.md). Sprinting, crouching and fall damage
   are still open, as is a general entity system.
-- Noise-based terrain generation (currently a flat plane at y=32)
-- Infinite world: chunk streaming based on player position (currently a fixed 3×3 grid)
+- Noise-based terrain generation: planned as [M16](milestones/M16-noise-foundation.md),
+  [M17](milestones/M17-plains-terrain.md) and [M18](milestones/M18-vegetation-features.md).
+- Chunk streaming: planned as [M14](milestones/M14-async-chunk-pipeline.md) and
+  [M15](milestones/M15-chunk-streaming.md).
 - World persistence: save and load chunks, player state and time to disk
 
 **Lighting**
@@ -65,6 +74,9 @@ would make the game most playable soonest.
 - Level of detail for distant chunks
 
 **Content**
+- Multiple biomes, caves, oceans and floating islands: sketched in
+  [M19](milestones/M19-data-driven-biomes.md), which is where the magi-tech identity
+  is meant to land.
 - Transparent blocks (glass, leaves) — the vertex alpha channel is freed for this in M4
 - Liquids, stairs, fences, doors
 - Tool tiers, block hardness, item drops
