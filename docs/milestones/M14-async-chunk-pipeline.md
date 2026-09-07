@@ -119,3 +119,62 @@ it is still correct.
 
 Dynamic loading and unloading (that is M15), any change to terrain, level of
 detail, and mesh data compression.
+
+## Progress
+
+Two foundations landed. The pipeline itself is still to come.
+
+### `Engine.SeedChunk` — per-chunk lighting
+
+M3 deleted the previous `SeedChunk` for being order-dependent: it wiped its own
+chunk before reseeding from neighbour borders, so seeding chunk B destroyed
+light chunk A had pushed into it, and recovery depended on which came next.
+
+This one has no wipe, and that is the whole argument for bringing it back.
+**Adding a chunk can only add light.** An unloaded chunk reads as opaque, so
+before it arrived its neighbours were lit as though every cell in it were solid
+rock. Air appearing where rock was assumed can only open new paths; it cannot
+invalidate a value the neighbours already hold, because that value never
+depended on this chunk. So nothing needs removing, and an add-only propagation
+converges regardless of arrival order.
+
+Its load-bearing test is equivalence: seeding chunks one at a time ends
+byte-identical to `RecomputeAll` over the finished world, in both channels.
+Mutation-tested — dropping the neighbour-border seeding leaves light stopping
+at the seam.
+
+### `internal/chunks.Snapshot` — an immutable view for workers
+
+Mesh workers cannot read the live world: `World.Chunks` is a plain map, and a
+concurrent read during a write is a Go runtime throw, not a subtle race.
+Locking per mesh build would serialise away the parallelism it exists for.
+
+So a worker gets a copy of the 3×3 neighbourhood, taken on the owning goroutine
+and then read with no locking at all. It costs about 2.9 MB and a memcpy, which
+is cheap against a mesh build, and snapshots are pooled.
+
+This needed no change to the mesh package, because the mesher already reads
+through `mesh.WorldReader`. One wrinkle: `WorldReader` and `ChunkReader`
+declare the same method names in *global* and *local* coordinates
+respectively, so one type cannot satisfy both. The snapshot is the
+`WorldReader`; `Center()` hands back the copied centre chunk as the
+`ChunkReader`.
+
+Its load-bearing test is that meshing through the snapshot produces
+byte-identical geometry to meshing through the live world — if the substitution
+is invisible, the copy is faithful in every way the renderer can observe.
+Mutation-tested twice: omitting the light arrays fails the read comparison, and
+failing to clear an absent neighbour on reuse leaks stale data into a recycled
+snapshot.
+
+### A sharp edge removed from the test harness
+
+`testutil.Flat` rewrites *every* allocated chunk, so calling it to add terrain
+for a newly arrived chunk silently refilled tunnels an earlier `Clear` had
+carved. It cost a misleading test failure that looked like a lighting bug.
+
+`Flat` now refuses to run after any `Fill` or `Clear`, which immediately caught
+two further tests building the wrong world and passing anyway. `FlatChunk` was
+added for the case that actually needed expressing — a single chunk arriving
+into a world that is already built and lit, which streaming tests will need
+constantly.

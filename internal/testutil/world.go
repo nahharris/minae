@@ -26,6 +26,10 @@ type Box struct {
 type WorldBuilder struct {
 	t *testing.T
 	w *world.World
+
+	// carved records whether Fill or Clear has run, so a later Flat can refuse
+	// rather than silently overwrite the result.
+	carved bool
 }
 
 // NewWorld starts a builder holding an empty world with no chunks.
@@ -64,8 +68,18 @@ func (b *WorldBuilder) Chunks(minCX, minCZ, maxCX, maxCZ int) *WorldBuilder {
 
 // Flat lays stone/dirt/grass columns across every allocated chunk, with the
 // topmost grass block at surfaceY. Everything above surfaceY is left as air.
+//
+// It applies to EVERY allocated chunk, not only ones added since the last
+// call, so calling it after carving would silently refill what was carved.
+// That is a mistake often enough that it is refused outright: allocate all the
+// chunks and lay the terrain first, then Fill and Clear on top of it.
 func (b *WorldBuilder) Flat(surfaceY int) *WorldBuilder {
 	b.t.Helper()
+
+	if b.carved {
+		b.t.Fatal("Flat after Fill or Clear: Flat rewrites every allocated chunk and " +
+			"would undo the carving. Allocate the chunks and call Flat first, then carve.")
+	}
 
 	if surfaceY < 0 || surfaceY >= config.ChunkHeight {
 		b.t.Fatalf("Flat: surfaceY %d outside 0..%d", surfaceY, config.ChunkHeight-1)
@@ -80,6 +94,35 @@ func (b *WorldBuilder) Flat(surfaceY int) *WorldBuilder {
 				for y := 0; y <= surfaceY; y++ {
 					chunk.SetBlock(x, y, z, blockForDepth(surfaceY-y))
 				}
+			}
+		}
+	}
+	return b
+}
+
+// FlatChunk lays terrain in one already-allocated chunk and leaves every other
+// chunk exactly as it is.
+//
+// This is how a chunk arriving into a world that is already built and lit is
+// modelled, which Flat cannot express: Flat rewrites every allocated chunk, so
+// using it to add terrain to a newcomer would also rewrite the neighbours the
+// test just carved and lit.
+func (b *WorldBuilder) FlatChunk(cx, cz, surfaceY int) *WorldBuilder {
+	b.t.Helper()
+
+	if surfaceY < 0 || surfaceY >= config.ChunkHeight {
+		b.t.Fatalf("FlatChunk: surfaceY %d outside 0..%d", surfaceY, config.ChunkHeight-1)
+	}
+
+	chunk := b.w.GetChunk(cx, cz)
+	if chunk == nil {
+		b.t.Fatalf("FlatChunk: chunk (%d,%d) is not allocated; call Chunks first", cx, cz)
+	}
+
+	for x := range config.ChunkWidth {
+		for z := range config.ChunkWidth {
+			for y := 0; y <= surfaceY; y++ {
+				chunk.SetBlock(x, y, z, blockForDepth(surfaceY-y))
 			}
 		}
 	}
@@ -102,6 +145,7 @@ func blockForDepth(depth int) *blocks.Block {
 // a test authoring mistake and fail the test rather than being skipped.
 func (b *WorldBuilder) Fill(box Box, blk *blocks.Block) *WorldBuilder {
 	b.t.Helper()
+	b.carved = true
 	b.forEach(box, func(chunk *world.Chunk, lx, y, lz int) {
 		chunk.SetBlock(lx, y, lz, blk)
 	})
