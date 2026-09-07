@@ -1,7 +1,10 @@
 package game
 
 import (
+	"runtime"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
+	"github.com/nahharris/minae/internal/chunks"
 	render "github.com/nahharris/minae/internal/gfx"
 	"github.com/nahharris/minae/internal/platform/logging"
 	resources "github.com/nahharris/minae/internal/platform/resources"
@@ -11,6 +14,19 @@ import (
 	"github.com/nahharris/minae/internal/world/lighting"
 	"github.com/sirupsen/logrus"
 )
+
+// pipelineBudget caps the chunk pipeline's work in a single Update call. It
+// is generous enough to finish the fixed 3x3 startup region in a handful of
+// frames; once that region is fully Meshed the pipeline has nothing left to
+// do each frame but a couple of cheap, empty channel checks, so there is no
+// ongoing cost to keeping the same budget for the life of the game. Dynamic
+// loading (M15) will need to revisit this once regions can grow.
+var pipelineBudget = chunks.Budget{Light: 9, Mesh: 9}
+
+// fixedRegionRadius is the half-width, in chunks, of the fixed region loaded
+// at startup: a radius of 1 is the same 3x3 grid world.GenerateFixedGrid used
+// to build synchronously. Dynamic loading around the player is M15.
+const fixedRegionRadius = 1
 
 // Game manages the global game state and systems.
 type Game struct {
@@ -22,6 +38,7 @@ type Game struct {
 	Renderer *render.SceneRenderer
 	UI       *ui.UIManager
 	Lighting *lighting.Engine
+	Pipeline *chunks.Pipeline
 
 	Log *logrus.Entry
 }
@@ -31,29 +48,33 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 	log := logging.ForPackage("game")
 	log.Info("Initializing game...")
 
-	// Initialize World (Chunks + PlayerState + TimeOfDay)
+	// Initialize World (Chunks + PlayerState + TimeOfDay). Chunks arrive
+	// asynchronously below rather than being filled in here.
 	w := world.NewWorld()
-	w.GenerateFixedGrid()
 
-	// Light the whole world once. RecomputeAll is order-independent, unlike
-	// seeding chunk by chunk, so the result does not depend on map iteration
-	// order.
-	log.Info("Calculating initial lighting...")
 	lightEngine := lighting.NewEngine(w)
-	lightEngine.RecomputeAll()
-	lightEngine.DirtyChunks() // Drain: every chunk is meshed for the first time below.
+
+	// workers is left at NewPipeline's discretion beyond "more than zero";
+	// NumCPU is a reasonable default for a pool that does both CPU-bound
+	// generation and meshing.
+	pipeline := chunks.NewPipeline(w, lightEngine, chunks.FlatGenerator{}, res.Atlas, runtime.NumCPU())
+
+	// Request the same fixed 3x3 region world.GenerateFixedGrid used to build
+	// synchronously. It now appears over the first few frames as the
+	// pipeline generates, lights and meshes it off the main thread, instead
+	// of blocking startup until it is all done.
+	log.Info("Requesting startup chunks...")
+	for x := -fixedRegionRadius; x <= fixedRegionRadius; x++ {
+		for z := -fixedRegionRadius; z <= fixedRegionRadius; z++ {
+			pipeline.Request(world.ChunkCoord{X: x, Z: z})
+		}
+	}
 
 	// Initialize Player (Runtime wrapper around World.PlayerState)
 	p := player.NewPlayer(w.PlayerState)
 
 	// Initialize Renderer
 	renderer := render.NewSceneRenderer(res)
-
-	// Initial mesh generation
-	log.Info("Generating initial meshes...")
-	for _, chunk := range w.Chunks {
-		renderer.UpdateMesh(chunk, w)
-	}
 
 	// Initialize UI
 	u := ui.NewUIManager(p, w, w.TimeOfDay)
@@ -66,6 +87,7 @@ func NewGame(res *resources.Resources, dataFolder string) *Game {
 		Renderer: renderer,
 		UI:       u,
 		Lighting: lightEngine,
+		Pipeline: pipeline,
 		Log:      log,
 	}
 
@@ -89,6 +111,13 @@ func (g *Game) Update() {
 			g.State = StatePlaying
 			g.Log.Info("Game Resumed")
 		}
+	}
+
+	// Advance the chunk pipeline and upload whatever it finished. This runs
+	// every frame regardless of pause state, so the world keeps streaming in
+	// even while the pause menu is up.
+	for _, ready := range g.Pipeline.Update(pipelineBudget) {
+		g.Renderer.UploadChunkMesh(ready.Coord, ready.Data)
 	}
 
 	// State Management
@@ -213,6 +242,7 @@ func (g *Game) Draw() {
 
 // Unload cleans up resources.
 func (g *Game) Unload() {
+	g.Pipeline.Close()
 	g.Renderer.Unload()
 }
 
@@ -227,6 +257,14 @@ func (g *Game) Unload() {
 //   - the engine's dirty set — every chunk whose skylight the change altered.
 //     Light crosses chunk seams, so this routinely includes chunks the block
 //     itself did not touch.
+//
+// Every stale chunk is also reported to the pipeline via Invalidate. Editing
+// a block bypasses the pipeline entirely — this method rebuilds the mesh here
+// and now, synchronously — but the pipeline does not know that happened. If
+// it had a mesh job in flight for one of these chunks (only possible in the
+// first few frames, while the fixed startup region is still arriving),
+// Invalidate stops that job's now-stale result from later overwriting the
+// mesh built here with one that predates the edit.
 func (g *Game) remeshAfterBlockChange(result world.InteractionResult) {
 	pos := result.ChangedBlock
 	g.Lighting.OnBlockChanged(pos[0], pos[1], pos[2])
@@ -240,6 +278,8 @@ func (g *Game) remeshAfterBlockChange(result world.InteractionResult) {
 	}
 
 	for coord := range stale {
+		g.Pipeline.Invalidate(coord)
+
 		chunk, exists := g.World.Chunks[coord]
 		if !exists {
 			g.Renderer.RemoveMesh(coord)

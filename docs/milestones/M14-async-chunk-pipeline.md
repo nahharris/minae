@@ -1,6 +1,6 @@
 # M14 — Async chunk pipeline
 
-**Status:** 📋 Planned
+**Status:** ✅ Done
 
 ## Objective
 
@@ -178,3 +178,65 @@ two further tests building the wrong world and passing anyway. `FlatChunk` was
 added for the case that actually needed expressing — a single chunk arriving
 into a world that is already built and lit, which streaming tests will need
 constantly.
+
+## Result
+
+The pipeline is in and wired into the game. Generation and meshing run on a
+worker pool; lighting and GPU upload stay on the main thread. `internal/chunks`
+is at ~92% coverage, total 58.2%.
+
+Parity, determinism and race-freedom are all verified. Parity is the one that
+matters most: for the same region, the async result is byte-identical to what
+the synchronous path produced — blocks, both light channels, and mesh geometry.
+
+### A chunk arriving invalidates its neighbours' meshes, even when it changes no light
+
+The design reacted to `DirtyChunks`, which reports *light* changes. That misses
+a whole category: **a neighbour appearing changes face culling**. Seam faces
+drawn against absent space must be culled once something is actually there, and
+no light needs to change for that to be true.
+
+A chunk that is solid to the top of the world is the pure case — seeding it
+writes nothing at all, so it produces no dirt, and its neighbour would keep
+drawing seam faces into rock forever.
+
+`invalidateNeighbourMeshesLocked` now demotes any already-meshed neighbour when
+a chunk arrives, bumping its epoch so an in-flight job built against the older
+world is discarded. Mutation-tested: removing it fails the test.
+
+This was flagged in passing during implementation as an M15 concern. It is
+cheaper to close now than to hit while debugging streaming.
+
+### `demoteDirty` cannot be observed within this milestone's scope
+
+Worth recording honestly. Removing the re-mesh-on-light-change entirely does not
+change any output this milestone can produce, on flat *or* varied terrain,
+because the stage rule already guarantees every neighbour is lit before anything
+is meshed. Light is final by meshing time.
+
+It becomes load-bearing the moment chunks arrive one at a time, which is M15. It
+is kept and exercised, but the parity tests do not prove it — the direct
+late-arrival test does.
+
+### "All eight neighbours" cannot be taken literally
+
+Read strictly, every chunk on the edge of any finite region would wait forever
+for neighbours nobody asked for. The rule is therefore: a neighbour gates a
+transition only if it has been requested; an unrequested neighbour vacuously
+satisfies it.
+
+That is safe here only because M14 has no dynamic loading — nothing can appear
+later and invalidate a chunk meshed against assumed-absent space. **M15 breaks
+that assumption**, and the neighbour-invalidation above is what will carry it.
+
+### Testing a non-blocking API
+
+`Update` never blocks, so a tight loop burns thousands of iterations in
+microseconds and gives workers no chance to finish. Two tests were written
+against iteration counts and reported stalls that were only impatience. Every
+drive loop is now bounded by wall time.
+
+The race test also had to stop editing eventually: every `Invalidate` demotes a
+chunk, so a fast enough edit stream keeps the pipeline permanently behind and
+nothing ever reaches `Meshed`. It now applies a burst and then asserts the
+pipeline settles — which is a better property than the one originally intended.
