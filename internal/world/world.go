@@ -1,6 +1,8 @@
 package world
 
 import (
+	"math"
+
 	"github.com/nahharris/minae/internal/blocks"
 	"github.com/nahharris/minae/internal/platform/config"
 )
@@ -226,6 +228,22 @@ func (w *World) SetBlockState(x, y, z int, b *blocks.Block, meta uint8) []ChunkC
 	}
 
 	return affected
+}
+
+// ChunkCoordAt returns the chunk coordinate containing the given world-space
+// position.
+//
+// The position is floored, not truncated, before converting: truncating
+// toward zero would put x=-0.5 in chunk 0 instead of chunk -1, the same
+// class of bug ChunkAndLocal's doc comment warns about for integers. This is
+// the streaming code's entry point from a player's floating-point position
+// into chunk space, so getting it wrong at negative coordinates would mean
+// the desired set silently disagreeing with where the player actually is
+// the moment they cross the origin.
+func ChunkCoordAt(x, z float32) ChunkCoord {
+	cx, _ := ChunkAndLocal(int(math.Floor(float64(x))))
+	cz, _ := ChunkAndLocal(int(math.Floor(float64(z))))
+	return ChunkCoord{X: cx, Z: cz}
 }
 
 // ChunkAndLocal converts a global coordinate along one axis into the chunk index

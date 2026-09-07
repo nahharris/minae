@@ -25,6 +25,12 @@ type GameConfig struct {
 	MouseSens        float32 `yaml:"mouse_sens"`
 	PlayerArmLength  float32 `yaml:"player_arm_length"`
 	DayCycleDuration float32 `yaml:"day_cycle_duration"`
+	// ViewDistance is the load radius in chunks (Chebyshev distance), so a
+	// value of n loads a (2n+1)x(2n+1) square around the player. The M15
+	// design decisions set the unload radius at ViewDistance+2, not
+	// configured separately, so the hysteresis margin cannot be
+	// misconfigured to less than the two chunks it needs.
+	ViewDistance int `yaml:"view_distance"`
 }
 
 // DefaultConfig provides sensible defaults
@@ -39,6 +45,7 @@ func DefaultConfig() GameConfig {
 		MouseSens:        0.003,
 		PlayerArmLength:  5.0,
 		DayCycleDuration: 600.0,
+		ViewDistance:     8,
 	}
 }
 

@@ -156,6 +156,20 @@ type Pipeline struct {
 	requested []world.ChunkCoord
 	epoch     map[world.ChunkCoord]int
 
+	// nextEpoch is a single monotonically increasing counter that every
+	// epoch value is drawn from, so no two mesh jobs ever share one — not
+	// even jobs for the same coord separated by a Release.
+	//
+	// Per-coord counters would be enough if a coord's history were
+	// unbroken, but Release deletes its epoch entry, so a re-requested coord
+	// would start counting from zero again and its first job would collide
+	// with a job still in flight from the coord's previous life. That job
+	// was meshed against a completely different neighbourhood — the player
+	// walked away and came back — and drainMeshed would see a matching
+	// epoch and accept it. Drawing from one counter makes a reused epoch
+	// impossible by construction rather than by argument.
+	nextEpoch int
+
 	closeOnce sync.Once
 }
 
@@ -251,6 +265,67 @@ func (p *Pipeline) Stage(coord world.ChunkCoord) Stage {
 	return p.stages[coord]
 }
 
+// Release undoes everything Request set up for coord: the pipeline no longer
+// wants it, and every trace of it is removed so nothing can resurrect it
+// later. This is the streaming counterpart to Request, and it is the
+// direction M15 singles out as the one nobody tests — a leak here is silent
+// and only shows up as memory climbing over a long session.
+//
+// Release must, in full:
+//
+//   - delete coord from stages, which is what discards a mesh job already in
+//     flight: drainMeshed treats a result whose coord is no longer Meshing as
+//     stale, and a released coord reads back as Absent,
+//   - delete coord from epoch, so a later Request for the same coord starts
+//     completely fresh with no memory of this one. That is safe only because
+//     epochs come from a monotonic counter — see Pipeline.nextEpoch. Were
+//     they per-coord counters, deleting here would reset the coord to zero
+//     and its next job would collide with one still in flight from this
+//     life, which drainMeshed would then accept as current,
+//   - remove it from the pending requested queue if a worker never picked it
+//     up, so dispatchGenerating never spends a worker generating a chunk
+//     nobody wants any more,
+//   - delete it from World.Chunks, so it is no longer part of the world at
+//     all, and
+//   - invalidate its neighbours' meshes, because their face culling assumed
+//     this chunk was there and it no longer is — the exact mirror of what
+//     invalidateNeighbourMeshesLocked does when a chunk arrives, run here
+//     because a chunk disappearing changes seam geometry exactly as much as
+//     one appearing does.
+//
+// Missing any one of these is a leak or a stale mesh. It is safe to call for
+// a coord that was never requested; every step is then a no-op.
+func (p *Pipeline) Release(coord world.ChunkCoord) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	delete(p.stages, coord)
+	delete(p.epoch, coord)
+
+	for i, c := range p.requested {
+		if c == coord {
+			p.requested = append(p.requested[:i], p.requested[i+1:]...)
+			break
+		}
+	}
+
+	delete(p.w.Chunks, coord)
+
+	p.invalidateNeighbourMeshesLocked(coord)
+}
+
+// takeEpochLocked returns an epoch value that has never been used before and
+// never will be again. p.mu must already be held.
+//
+// Every site that invalidates a mesh — dispatching a new job, a neighbour
+// arriving or leaving, an external edit — draws from here rather than
+// incrementing a per-coord counter, so "this result is stale" is decided by
+// identity rather than by ordering.
+func (p *Pipeline) takeEpochLocked() int {
+	p.nextEpoch++
+	return p.nextEpoch
+}
+
 // Update advances the pipeline by one step and returns the meshes finished
 // this call, ready for the caller to upload. It must only be called from the
 // main thread: it is the only place World.Chunks is written, the only place
@@ -270,16 +345,47 @@ func (p *Pipeline) Update(budget Budget) []Ready {
 }
 
 // drainGenerated inserts every chunk a generation worker has finished into
-// World.Chunks and marks it Generated. It is unbounded: draining a finished
-// result only ever does two map writes, so there is no per-frame cost worth
-// budgeting here the way there is for lighting and meshing.
+// World.Chunks and marks it Generated, unless coord is no longer wanted. It
+// is unbounded: draining a finished result only ever does two map writes, so
+// there is no per-frame cost worth budgeting here the way there is for
+// lighting and meshing.
+//
+// The wanted-check exists because of Release (M15): a result can arrive for
+// a coord that was released while its generation job was still in flight.
+// Inserting it unconditionally, as this did before dynamic unloading existed,
+// would resurrect a chunk nobody wants — a genuine leak, and the loaded set
+// would silently stop matching the desired set. The check is simply that
+// coord is still known and still Generating: Release deletes coord from
+// stages entirely, so a released coord fails "still known", and a coord that
+// was released and then re-requested before this result arrived is back at
+// Absent, which also fails "still Generating".
+//
+// This uses no generation epoch, and deliberately so — adding one would be
+// cargo cult. The one sequence that looks like it needs one is: request,
+// release, request again, and only then the original result arrives. At that
+// point the stage is Generating (the second Request put it there) and the
+// coord is known, so the wanted-check accepts the result — and that is
+// correct, not a near-miss the epoch happened to paper over. Generator.Generate
+// is required to be a pure function of coord, so the stale-looking result and
+// the one actually in flight for the second request are computed from
+// identical inputs and are the same chunk byte for byte. An epoch earns its
+// keep only when a result can be wrong depending on when it was computed —
+// true for meshing, which reads the mutable world, and false for generation,
+// which reads nothing at all.
 func (p *Pipeline) drainGenerated() {
 	for {
 		select {
 		case res := <-p.genResults:
-			p.w.Chunks[res.coord] = res.chunk
-
 			p.mu.Lock()
+			if stage, known := p.stages[res.coord]; !known || stage != Generating {
+				// Released (and possibly not yet re-requested) since this job
+				// was dispatched: applying it would write World.Chunks for a
+				// coord the pipeline no longer considers loaded.
+				p.mu.Unlock()
+				continue
+			}
+
+			p.w.Chunks[res.coord] = res.chunk
 			p.stages[res.coord] = Generated
 			p.invalidateNeighbourMeshesLocked(res.coord)
 			p.mu.Unlock()
@@ -313,9 +419,10 @@ func (p *Pipeline) invalidateNeighbourMeshesLocked(coord world.ChunkCoord) {
 			switch p.stages[neighbour] {
 			case Meshed, Meshing:
 				p.stages[neighbour] = Lit
-				// Bump the epoch so an in-flight job for this neighbour, built
-				// against a world without coord in it, is discarded on arrival.
-				p.epoch[neighbour]++
+				// Take a fresh epoch so an in-flight job for this neighbour,
+				// built against a world without coord in it, is discarded on
+				// arrival.
+				p.epoch[neighbour] = p.takeEpochLocked()
 			}
 		}
 	}
@@ -402,7 +509,7 @@ func (p *Pipeline) dispatchMeshing() {
 			continue
 		}
 
-		p.epoch[coord]++
+		p.epoch[coord] = p.takeEpochLocked()
 		job := meshJob{coord: coord, epoch: p.epoch[coord], snapshot: snap}
 
 		select {
@@ -410,9 +517,12 @@ func (p *Pipeline) dispatchMeshing() {
 			p.stages[coord] = Meshing
 			p.mu.Unlock()
 		default:
-			// Undo the epoch bump: no job was actually sent, so nothing
-			// should be able to invalidate a result that was never produced.
-			p.epoch[coord]--
+			// The epoch stays where it is. There is nothing to undo: epochs
+			// are drawn from a counter that only ever moves forward, so a
+			// value spent on a job that was never sent is simply skipped.
+			// Leaving it also happens to be the safe direction — if a job
+			// for this coord is still in flight from before a demotion, the
+			// value taken here already tells drainMeshed to discard it.
 			p.mu.Unlock()
 			snap.Release()
 			return
@@ -524,7 +634,7 @@ func (p *Pipeline) Invalidate(coord world.ChunkCoord) {
 	case Meshing:
 		// The in-flight job's epoch is now stale, so drainMeshed will discard
 		// its result instead of marking the chunk Meshed with old data.
-		p.epoch[coord]++
+		p.epoch[coord] = p.takeEpochLocked()
 		p.stages[coord] = Lit
 	case Meshed:
 		p.stages[coord] = Lit
