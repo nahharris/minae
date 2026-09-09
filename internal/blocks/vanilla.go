@@ -36,11 +36,26 @@ var (
 	})
 	Wood      = Register(&Block{ID: "minae/wood", Name: "Wood", Color: 0x8B4513FF})
 	Glowstone = Register(&Block{ID: "minae/glowstone", Name: "Glowstone", Color: 0xFFD98CFF, LightLevel: 15})
+
+	// Leaves is the first block for which "transparent" splits into more than
+	// one property (see block.go's OpaqueToLight and HidesFaceOf, and
+	// docs/milestones/M18-vegetation-features.md): light passes through it
+	// (LightTransparent), but it still collides like any other full block
+	// (the default "full" model, unchanged), and its faces are culled only
+	// against other leaves (SelfCulling), not against air or opaque blocks
+	// showing through it.
+	Leaves = Register(&Block{
+		ID:               "minae/leaves",
+		Name:             "Leaves",
+		Color:            0x3F8F3AFF,
+		LightTransparent: true,
+		SelfCulling:      true,
+	})
 )
 
 // vanillaBlocks returns every built-in block, in registration order.
 func vanillaBlocks() []*Block {
-	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood, Glowstone}
+	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood, Glowstone, Leaves}
 }
 
 // ResetToVanilla clears the registry and re-registers the built-in blocks.

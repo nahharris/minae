@@ -544,3 +544,12 @@ light provably cannot leave its 3×3 neighbourhood, so chunks 3 apart have
 disjoint write footprints and need no locking at all. The real work is that
 `Engine` holds mutable scratch which would have to become per-worker — and
 that is worth doing when there is a second caller, not before.
+
+### Confirmed in play
+
+2026-09-07: "perf is good". The startup stall and the walking freeze are both
+gone at the default view distance of 8.
+
+That closes the report this follow-up was opened for. The GPU mesh upload in
+`app.go` remains genuinely unmeasured — it runs after `Update` returns and no
+budget covers it — so it stays the first suspect if hitching ever reappears.

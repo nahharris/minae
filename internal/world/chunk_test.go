@@ -84,6 +84,63 @@ func TestChunk_HighestSolidY(t *testing.T) {
 	}
 }
 
+// TestChunk_HighestSolidY_LightTransparentBlockDoesNotRaiseIt is the M18
+// sky-ceiling/light-predicate tie, checked directly rather than trusted: a
+// light-transparent block (leaves) is a real, solid, non-air block, but
+// highestSolidY is defined as "the highest block the light engine considers
+// opaque" (blocks.OpaqueToLight), not "the highest non-air block". If a leaf
+// raised this value, the ceiling optimization in
+// world/lighting.seedSkyLight would stop doing its job around every tree
+// without necessarily producing wrong *pixels* (see this test's sibling
+// below and the design decision in
+// docs/milestones/M18-vegetation-features.md) — so this asserts the value
+// itself, which is the one place that mutation is directly observable.
+//
+// A mutation of SetBlock/SetBlockState back to deciding solidity from
+// `block != nil` instead of blocks.OpaqueToLight makes this test fail: the
+// leaf below would raise highestSolidY to 5 instead of leaving it at the
+// opaque block's height of 2.
+func TestChunk_HighestSolidY_LightTransparentBlockDoesNotRaiseIt(t *testing.T) {
+	blocks.Reset()
+	opaque := blocks.Register(&blocks.Block{ID: "test/opaque", Name: "Opaque"})
+	leaf := blocks.Register(&blocks.Block{ID: "test/leaf", Name: "Leaf", LightTransparent: true})
+
+	c := NewChunk(0, 0)
+
+	c.SetBlock(0, 2, 0, opaque)
+	if got := c.HighestSolidY(); got != 2 {
+		t.Fatalf("after placing an opaque block at y=2, HighestSolidY = %d, want 2", got)
+	}
+
+	// A light-transparent block placed higher than the opaque one must NOT
+	// raise the ceiling: a column through it is genuinely open sky at full
+	// brightness all the way down to the real opaque block beneath it.
+	c.SetBlock(0, 5, 0, leaf)
+	if got := c.HighestSolidY(); got != 2 {
+		t.Fatalf("after placing a light-transparent block at y=5, HighestSolidY = %d, want unchanged 2 "+
+			"(a light-transparent block must never raise the sky ceiling)", got)
+	}
+
+	// Removing the opaque block leaves only the leaf, which the ceiling must
+	// treat as if the chunk were entirely open air (-1), not fall back to the
+	// leaf's own height.
+	c.SetBlock(0, 2, 0, nil)
+	if got := c.HighestSolidY(); got != -1 {
+		t.Fatalf("after removing the only opaque block (leaving a light-transparent one at y=5), HighestSolidY = %d, want -1", got)
+	}
+
+	// SetBlockState must derive the same rule, not just SetBlock.
+	c2 := NewChunk(1, 0)
+	c2.SetBlockState(0, 8, 0, leaf, 0)
+	if got := c2.HighestSolidY(); got != -1 {
+		t.Fatalf("SetBlockState: after placing only a light-transparent block, HighestSolidY = %d, want -1", got)
+	}
+	c2.SetBlockState(0, 3, 0, opaque, 0)
+	if got := c2.HighestSolidY(); got != 3 {
+		t.Fatalf("SetBlockState: after placing an opaque block at y=3 below the leaf, HighestSolidY = %d, want 3", got)
+	}
+}
+
 func TestWorld_GetBlock_Global(t *testing.T) {
 	blocks.Reset()
 	stone := blocks.Stone

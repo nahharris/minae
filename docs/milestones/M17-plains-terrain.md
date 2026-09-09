@@ -173,10 +173,14 @@ an assumption two milestones are resting on.
 
 ## Manual verification
 
-- [ ] The horizon reads as a landscape rather than as noise.
-- [ ] No visible seams or walls at chunk boundaries.
-- [ ] Walking across it feels like ground, not like a bumpy floor — worth
-      checking on foot now that M13 exists, since flying hides slope entirely.
+- [x] The horizon reads as a landscape rather than as noise. Confirmed on
+      2026-09-07: "world gen is nice".
+- [ ] No visible seams or walls at chunk boundaries. Not separately confirmed —
+      a wall at every seam would be hard to miss, but that is inference, not a
+      report, so it stays unticked.
+- [ ] Walking across it feels like ground, not like a bumpy floor. Not
+      separately confirmed. The measured figure to judge it against is one step
+      every ~14 blocks, each needing a jump since step height is 0.6.
 
 ## Explicitly out of scope
 

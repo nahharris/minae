@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/nahharris/minae/internal/blocks"
+	"github.com/nahharris/minae/internal/platform/config"
 	"github.com/nahharris/minae/internal/world"
 	"github.com/nahharris/minae/internal/world/lighting"
 	"github.com/nahharris/minae/internal/worldgen"
@@ -35,15 +36,37 @@ import (
 // no benefit — the terrain is a pure function of the seed, so the fourth copy
 // is exactly as good as regenerating it a fourth time.
 func TestSeedChunk_MatchesFullRecompute_GeneratedTerrain(t *testing.T) {
-	cases := map[string]func(t *testing.T) *world.World{
-		"varied heights, no carving": buildVariedHeightWorld,
-		"carved cave/tunnel":         buildGeneratedCaveWorld,
-		"overhang across a seam":     buildGeneratedOverhangWorld,
+	// allOrders marks the cases worth re-running reversed and shuffled as
+	// well as forward.
+	//
+	// Equivalence and order-independence are two different properties, and
+	// running every terrain shape through every order multiplies them for
+	// little return: order-independence has its own dedicated test
+	// (TestSeedChunk_OrderIndependent), and the shapes where order could
+	// plausibly interact with terrain are the ones whose geometry spans a
+	// seam. Those get all three orders; the rest get forward only.
+	//
+	// This is a real cost, not tidiness. Under -race with coverage this
+	// package runs roughly 25x slower than plain, and M18 made it worse in a
+	// way that is easy to miss: leaves are light-transparent, so light now
+	// propagates *through* every canopy rather than stopping at it, and the
+	// generated terrain every case starts from has trees in it now. The suite
+	// crossed Go's ten-minute default timeout and failed CI outright.
+	cases := []struct {
+		name      string
+		build     func(t *testing.T) *world.World
+		allOrders bool
+	}{
+		{"varied heights, no carving", buildVariedHeightWorld, false},
+		{"carved cave/tunnel", buildGeneratedCaveWorld, false},
+		{"overhang across a seam", buildGeneratedOverhangWorld, true},
+		{"tree canopy across a seam", buildGeneratedTreeWorld, false},
+		{"canopy above the neighbourhood ceiling", buildCanopyAboveCeilingWorld, true},
 	}
 
-	for name, build := range cases {
-		t.Run(name, func(t *testing.T) {
-			template := build(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			template := tc.build(t)
 
 			truthWorld := cloneWorld(template)
 			truth := lighting.NewEngine(truthWorld)
@@ -64,10 +87,10 @@ func TestSeedChunk_MatchesFullRecompute_GeneratedTerrain(t *testing.T) {
 				shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 			})
 
-			orders := map[string][]world.ChunkCoord{
-				"forward": forward,
-				"reverse": reversed,
-				"shuffle": shuffled,
+			orders := map[string][]world.ChunkCoord{"forward": forward}
+			if tc.allOrders {
+				orders["reverse"] = reversed
+				orders["shuffle"] = shuffled
 			}
 
 			for orderName, order := range orders {
@@ -194,6 +217,114 @@ func buildGeneratedOverhangWorld(t *testing.T) *world.World {
 		}
 	}
 	w.SetBlock(23, floorY, 0, blocks.Glowstone)
+
+	return w
+}
+
+// buildGeneratedTreeWorld is generated terrain with a synthetic tree -- a
+// Wood trunk and a Leaves canopy -- planted straddling the seam between
+// chunk (0,0) and (1,0). This is the M18 extension the milestone calls for:
+// the safety net for the whole transparency change needs terrain WITH trees,
+// and specifically at a chunk boundary, since every seam bug this project
+// has hit (M3's original black wall, M15's follow-up) lived exactly there.
+//
+// The tree is placed by hand rather than through worldgen's own feature
+// placement, so this test does not depend on a seed happening to produce a
+// tree in the right spot. The root column is chosen deliberately at the
+// boundary (x=15, next to x=16 in chunk (1,0)), and the trunk's base is read
+// from the real Generator.SurfaceHeight at that column, so it is genuinely
+// rooted on the generated ground rather than floating at a hand-picked
+// height that might not match the real terrain there.
+func buildGeneratedTreeWorld(t *testing.T) *world.World {
+	t.Helper()
+	w := generatedGrid(t)
+
+	g := worldgen.NewGenerator(genSeed)
+	const rootX, rootZ = 15, 4 // straddles the chunk (0,0)/(1,0) seam at x=15/16
+	groundY := g.SurfaceHeight(rootX, rootZ)
+
+	const trunkHeight = 5
+	for dy := 0; dy < trunkHeight; dy++ {
+		w.SetBlock(rootX, groundY+dy, rootZ, blocks.Wood)
+	}
+
+	// A canopy loose enough to cross the seam in every direction, skipping
+	// the trunk column and never overwriting a cell that already holds
+	// something (matching how features.go's placeIfInChunk never overwrites
+	// existing terrain).
+	top := groundY + trunkHeight - 1
+	for dx := -2; dx <= 2; dx++ {
+		for dz := -2; dz <= 2; dz++ {
+			if dx == 0 && dz == 0 {
+				continue
+			}
+			for dy := -1; dy <= 1; dy++ {
+				gx, gy, gz := rootX+dx, top+dy, rootZ+dz
+				if w.GetBlock(gx, gy, gz) == nil {
+					w.SetBlock(gx, gy, gz, blocks.Leaves)
+				}
+			}
+		}
+	}
+
+	return w
+}
+
+// buildCanopyAboveCeilingWorld plants a canopy that provably sits above the
+// highest terrain anywhere in the region, with open air beneath it.
+//
+// This exists because buildGeneratedTreeWorld does not exercise the case it
+// looks like it does. Its canopy tops out about five blocks above its own
+// root column, and generated terrain spans roughly twenty blocks of relief,
+// so the canopy usually ends up *below* the neighbourhood's highest solid
+// block. Every canopy cell is then enqueued regardless and the sky-ceiling
+// optimisation is never actually put under strain.
+//
+// The strain matters. `SeedChunk` skips enqueueing sky cells above the
+// highest light-opaque block in the 3x3 neighbourhood, on the argument that
+// every column up there is open sky at full brightness. That argument holds
+// only while "light-opaque" means the same thing to `Chunk.highestSolidY` as
+// it does to the light engine. Break that tie — let something block light
+// without raising the ceiling — and the cells it shades from above are never
+// queued, so light never reaches them sideways. Verified: with leaves made
+// light-opaque while excluded from the ceiling, this case fails and the four
+// above it pass.
+//
+// The canopy height is computed from the terrain rather than hardcoded, so
+// the test keeps testing this even if the generator is retuned.
+func buildCanopyAboveCeilingWorld(t *testing.T) *world.World {
+	t.Helper()
+	w := generatedGrid(t)
+
+	g := worldgen.NewGenerator(genSeed)
+
+	// The real ceiling is the highest solid block across the whole region, so
+	// find it rather than guessing.
+	highest := 0
+	for x := -config.ChunkWidth; x < 2*config.ChunkWidth; x++ {
+		for z := -config.ChunkWidth; z < 2*config.ChunkWidth; z++ {
+			if h := g.SurfaceHeight(x, z); h > highest {
+				highest = h
+			}
+		}
+	}
+
+	// Well clear of it, leaving a band of open air between the terrain and
+	// the canopy. That band is the part that goes dark when the tie breaks:
+	// it is above the ceiling, and it is in the canopy's shadow.
+	const clearance = 8
+	canopyY := highest + clearance
+	if canopyY+1 >= config.ChunkHeight {
+		t.Fatalf("canopy at y=%d does not fit below the world height %d", canopyY, config.ChunkHeight)
+	}
+
+	// Straddling the (0,0)/(1,0) seam, because a seam is where every lighting
+	// bug this project has had actually lived.
+	for x := 12; x <= 20; x++ {
+		for z := 2; z <= 8; z++ {
+			w.SetBlock(x, canopyY, z, blocks.Leaves)
+		}
+	}
 
 	return w
 }
