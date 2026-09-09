@@ -1,6 +1,6 @@
 # M18 — Trees and bushes
 
-**Status:** 📋 Planned
+**Status:** ✅ Done
 **Depends on:** [M17](M17-plains-terrain.md)
 
 ## Objective
@@ -63,6 +63,93 @@ been waiting for exactly this:
 That is a lot of surface area, and it is the reason this milestone is separate
 from terrain rather than folded into it.
 
+## Design decisions
+
+### "Transparent" is three different properties wearing one hat
+
+Everything in this engine currently decides transparency with `block == nil`.
+That works only because air is the sole non-solid block, and it quietly
+conflates three questions that leaves answer differently:
+
+| property | air | stone | leaves |
+|---|---|---|---|
+| does light pass through it? | yes | no | **yes** |
+| can you walk through it? | yes | no | **no** |
+| does it hide the neighbouring face? | no | yes | **only against other leaves** |
+
+Leaves are the first block where these disagree, and that — not tree shape — is
+what makes this milestone worth its own pass. The three must become three
+distinct properties on `blocks.Block`, not one predicate consulted from three
+places.
+
+### The light predicate and the sky ceiling must be the same predicate
+
+This is the one that will bite, and it is worth stating before anyone writes
+code.
+
+The performance work in [M15's follow-up](M15-chunk-streaming.md#three-changes)
+skips enqueueing sky cells above the highest solid block in a chunk's
+neighbourhood, on the argument that every column above that height is open sky
+at full brightness and no horizontal step can raise anything. `Chunk` tracks
+that height today under the name `highestSolidY`.
+
+If leaves are light-transparent, they must **not** raise that height: a column
+through a canopy really is full-brightness all the way down, so excluding them
+is correct and keeps the optimisation working.
+
+If leaves ever attenuate light (see below), they **must** raise it. Otherwise
+the ceiling drops below the canopy, the cells under a tree that need to
+propagate horizontally are never queued, and every tree gets subtly wrong light
+around it — the exact defect this project was started to fix, reintroduced by
+an optimisation that predates the block causing it.
+
+So the rule is not "decide correctly for leaves". It is that the height must be
+defined as *the highest block the light engine considers opaque*, deriving from
+the same single property, so the two cannot drift apart when a later block type
+arrives. Tie them together in code rather than in a comment.
+
+### Leaves pass light unattenuated, for now
+
+The milestone text says "probably attenuated". Start binary instead: leaves let
+light through exactly as air does.
+
+Attenuation changes `kind.expected` from a function of (level, direction) into
+one of (level, direction, destination block). That is a change to the innermost
+shared BFS, and it must hold for the *removal* walk as well as the add walk —
+the symmetry between those two is what M3 got wrong twice and what M5 and M6
+were still correcting. Paying that cost for an effect nobody has asked to see
+yet is the trade M8 was skipped for.
+
+Binary first is also directly testable against the existing equivalence tests.
+If canopies then look wrong, attenuation is a contained follow-up with a known
+shape, rather than a complication bundled into a milestone that already touches
+lighting, meshing, AO and collision.
+
+### Feature radius is declared, bounded, and enforced by a test
+
+A chunk must be generated from its own features plus those of every chunk
+within the largest feature radius. That is only sound if the declared radius is
+truthful: a feature that writes one block beyond it produces two chunks that
+disagree about the same cell, and which version survives depends on generation
+order — invisible in a screenshot, and dependent on thread scheduling under the
+M14 worker pool.
+
+The radius must therefore be a property of the feature, and a test must assert
+no feature ever writes outside it. Not "review carefully" — asserted.
+
+### Generation stays pure, and gets measurably more expensive
+
+Evaluating neighbours' features means generating one chunk now costs
+(2r+1)² feature evaluations. At r=1 that is nine times the feature work per
+chunk.
+
+Generation runs on a worker pool and currently costs 235 µs, so there is room —
+but M14's and M15's budgets were both chosen against a generator that filled a
+constant, and [that assumption has already cost one freeze](M15-chunk-streaming.md#follow-up-streaming-was-too-slow-to-play).
+Benchmark chunk generation before and after, and report it. Purity is not
+negotiable: deriving placement from a running RNG, or from which neighbours
+happen to be loaded, makes the world depend on the path the player walked.
+
 ## Validation criteria
 
 1. **Deterministic placement.** The same seed puts the same trees in the same
@@ -97,3 +184,73 @@ from terrain rather than folded into it.
 
 Tall grass and flowers, saplings and growth, leaf decay, biome-varied tree
 species, and anything fantastical.
+
+## Result
+
+Trees and bushes are placed deterministically from `(worldSeed, chunkX, chunkZ)`
+with Poisson-disk rejection, within a declared and asserted feature radius.
+Leaves are the first block where "transparent" splits apart: light passes,
+collision holds, and faces cull only against other leaves. Coverage 64.8%.
+
+The three properties are three fields on `blocks.Block`, and the light
+predicate is one exported function, `blocks.OpaqueToLight`, that both
+`lighting.isTransparent` and `Chunk.highestSolidY` derive from. Tied in code,
+as the design decision required, so the two cannot drift when a later block
+type arrives.
+
+### The tie test did not test the tie
+
+The implementation reported the mandatory ceiling/predicate mutation as caught.
+It was not. Breaking the tie — leaves opaque to light while excluded from the
+ceiling — left every equivalence case passing.
+
+The reason is worth keeping, because the test looked entirely convincing. It
+plants a real tree straddling a chunk seam, which is the right instinct. But
+its canopy tops out about five blocks above its own root column, and generated
+terrain spans roughly twenty blocks of relief, so the canopy almost always ends
+up *below* the neighbourhood's highest solid block. Every canopy cell is
+enqueued regardless, and the sky-ceiling optimisation is never put under any
+strain at all.
+
+The bug needs light-blocking geometry **above** the ceiling, with open air
+beneath it. `buildCanopyAboveCeilingWorld` computes the highest terrain across
+the whole region and plants a canopy eight blocks clear of it, so the case
+holds even if the generator is retuned. With that added, the mutation fails in
+all three seeding orders and the other four cases still pass — the isolation
+that says the new case is what carries the guarantee.
+
+This is the third milestone running where a test's *terrain* was the weak part
+rather than its assertions. M15 needed an overhang, M17 needed non-uniform
+heights, and this needed geometry above the ceiling. Worth remembering when
+writing the next one: for anything spatial, ask what shape the bug requires
+before asking what the assertion should say.
+
+### Trees cost real time, and the suite noticed first
+
+| | before M18 | with trees | |
+|---|---|---|---|
+| `SeedChunk`, warm | 2.16 ms | 3.11 ms | +44% |
+| `SeedChunk`, cold | 2.82 ms | 3.29 ms | +17% |
+| chunk generation | 235 µs | 516 µs | 2.2× |
+
+Both are fine against the 4 ms light budget and a generator that runs on a
+worker. The cause of the lighting increase is worth naming though, because it
+is the direct consequence of the transparency decision: leaves let light
+through, so light now propagates *into and through* every canopy rather than
+stopping at it. Transparent blocks are more expensive to light than solid ones.
+
+That showed up first as a CI failure rather than a frame-rate one. Every
+equivalence case starts from generated terrain, which now has trees in it, and
+the package crossed Go's ten-minute default test timeout under
+`-race -covermode=atomic`. The matrix was running five terrain shapes against
+three seeding orders — multiplying two independent properties. Order
+independence has its own dedicated test, so only the two shapes whose geometry
+spans a seam keep all three orders. 601 s to 243 s, with no assertion
+weakened.
+
+### Leaves stay unattenuated
+
+As decided. Nothing here needed `kind.expected` to depend on the destination
+block, so the add and removal walks keep their symmetry untouched. If canopies
+read as too bright underneath, attenuation is a contained follow-up with a
+known shape.

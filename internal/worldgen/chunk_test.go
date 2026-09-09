@@ -8,12 +8,20 @@ import (
 	"github.com/nahharris/minae/internal/world"
 )
 
-// topSolidY returns the y coordinate one above the highest non-air block in
+// topSolidY returns the y coordinate one above the highest terrain block in
 // column (x, z) of c -- i.e. what SurfaceHeight should equal for the global
 // column that local column represents, if Generate filled it correctly.
+//
+// "Terrain block" deliberately excludes Wood and Leaves. M18 added features
+// painted on top of terrain (features.go), so a column under a tree can have
+// non-air blocks well above its actual SurfaceHeight; these tests are about
+// the terrain layering Generate produces independently of whether a tree
+// happens to grow there, so they look past feature blocks to the ground
+// underneath, exactly as SurfaceHeight itself does (it has no notion of
+// trees at all).
 func topSolidY(c *world.Chunk, x, z int) int {
 	for y := config.ChunkHeight - 1; y >= 0; y-- {
-		if c.GetBlock(x, y, z) != nil {
+		if b := c.GetBlock(x, y, z); b != nil && b != blocks.Wood && b != blocks.Leaves {
 			return y + 1
 		}
 	}
@@ -43,9 +51,14 @@ func TestGeneratedChunkLayeringAgreesWithSurfaceHeight(t *testing.T) {
 					x, z, gx, gz, got, want)
 			}
 
-			// Air at and above the surface.
-			if b := c.GetBlock(x, want, z); b != nil {
-				t.Fatalf("column (%d,%d): expected air at y=%d (the surface), got %s", x, z, want, b.ID)
+			// Air at and above the surface -- except where a tree or bush
+			// (features.go, painted after fillColumn) put its own geometry
+			// there. Terrain fill itself never writes at or above a column's
+			// own SurfaceHeight, so any block found there can only be Wood or
+			// Leaves; anything else means fillColumn, not a feature, got the
+			// height wrong.
+			if b := c.GetBlock(x, want, z); b != nil && b != blocks.Wood && b != blocks.Leaves {
+				t.Fatalf("column (%d,%d): expected air (or a feature block) at y=%d (the surface), got %s", x, z, want, b.ID)
 			}
 
 			// Grass on top.

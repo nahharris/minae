@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/nahharris/minae/internal/platform/logging"
 	"gopkg.in/yaml.v3"
@@ -33,6 +34,55 @@ var (
 	// Global registry instance
 	globalRegistry = newRegistry()
 )
+
+// opaqueByID is a lock-free, copy-on-write cache of OpaqueToLight indexed by
+// NumID, rebuilt (via rebuildOpaqueCacheLocked) every time the registry's ID
+// table changes.
+//
+// It exists for hot per-block-write paths -- world.Chunk.SetBlock and
+// SetBlockState -- that need this one boolean about the block a write is
+// replacing far more often than they need the *Block itself, and cannot
+// afford globalRegistry.mu's lock on every call: chunk generation alone
+// calls SetBlock on the order of 16,000 times per chunk. FromNumericID
+// remains correct and is still what everything else uses; this cache is a
+// narrower, faster answer to a narrower question, computed from the exact
+// same OpaqueToLight function FromNumericID's callers would get, so the two
+// can never disagree about what "opaque" means for a given ID -- only about
+// how fast the question can be answered.
+var opaqueByID atomic.Pointer[[]bool]
+
+// rebuildOpaqueCacheLocked recomputes opaqueByID from globalRegistry.byID.
+// Callers must already hold globalRegistry.mu (for writing) — it reads byID
+// directly rather than through the locking accessors.
+func rebuildOpaqueCacheLocked() {
+	cache := make([]bool, len(globalRegistry.byID))
+	for id, b := range globalRegistry.byID {
+		cache[id] = OpaqueToLight(b)
+	}
+	opaqueByID.Store(&cache)
+}
+
+// OpaqueToLightID is OpaqueToLight looked up by numeric ID instead of by
+// *Block, for callers that only have the compact storage form. It answers
+// exactly the same question OpaqueToLight(FromNumericID(id)) would -- air
+// (InvalidNumericID) is never opaque, any other ID reports whatever the
+// registry last computed for it via OpaqueToLight -- but does so through the
+// lock-free opaqueByID cache instead of FromNumericID's mutex, which matters
+// on the hot SetBlock/SetBlockState path (see opaqueByID's doc comment).
+func OpaqueToLightID(id NumID) bool {
+	if id == InvalidNumericID {
+		return false
+	}
+	cache := opaqueByID.Load()
+	if cache == nil {
+		return false
+	}
+	idx := int(id)
+	if idx < 0 || idx >= len(*cache) {
+		return false
+	}
+	return (*cache)[idx]
+}
 
 func newRegistry() *Registry {
 	return &Registry{
@@ -98,6 +148,7 @@ func Register(b *Block) *Block {
 		existing.numericID = id
 
 		existing.ensureModel()
+		rebuildOpaqueCacheLocked()
 		return existing
 	}
 
@@ -110,6 +161,7 @@ func Register(b *Block) *Block {
 	globalRegistry.ensureByIDCapacity(id)
 	globalRegistry.byID[id] = b
 
+	rebuildOpaqueCacheLocked()
 	return b
 }
 
@@ -126,6 +178,8 @@ func Reset() {
 	globalRegistry.ids = make(map[string]NumID)
 	globalRegistry.byID = make([]*Block, 1)
 	globalRegistry.nextID = 1
+
+	rebuildOpaqueCacheLocked()
 }
 
 func (r *Registry) allocateID(blockID string) NumID {

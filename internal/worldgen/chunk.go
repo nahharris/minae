@@ -21,6 +21,13 @@ import (
 // most likely bug in this package -- see SurfaceHeight's doc comment --
 // which is why it is spelled out here as globalX/globalZ rather than folded
 // into one expression.
+//
+// Once terrain is filled, paintFeatures (features.go) places every tree and
+// bush whose declared radius reaches into coord, rooted in coord itself or
+// in a neighbouring chunk. That call is likewise a pure function of
+// (g.worldSeed, coord) -- see rootsAffecting's doc comment -- so Generate as
+// a whole stays a pure function of coord, exactly as chunks.Generator
+// requires.
 func (g *Generator) Generate(coord world.ChunkCoord) *world.Chunk {
 	c := world.NewChunk(coord.X, coord.Z)
 
@@ -33,6 +40,8 @@ func (g *Generator) Generate(coord world.ChunkCoord) *world.Chunk {
 			fillColumn(c, localX, localZ, height)
 		}
 	}
+
+	g.paintFeatures(c, coord)
 
 	return c
 }

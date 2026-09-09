@@ -150,7 +150,18 @@ func buildChunkMesh(chunk ChunkReader, world WorldReader, uvLookup UVLookup) *me
 					if q.Cull {
 						dx, dy, dz := offsetForFace(q.Face)
 						neighbor, nmeta := world.GetBlockState(gx+dx, gy+dy, gz+dz)
-						if neighbor != nil {
+						// HidesFaceOf asks whether the neighbour is even the
+						// kind of thing that can hide this face, before
+						// bothering to ask its Model whether it geometrically
+						// does. That split matters for a light-transparent,
+						// self-culling block like leaves: leaves hide a
+						// neighbouring leaf's face (so a tree's interior
+						// doesn't render as solid geometry), but must not
+						// hide anything else's face, or a stone block sitting
+						// behind translucent leaves would have its own face
+						// culled away along with theirs — see
+						// blocks.Block.HidesFaceOf's doc comment.
+						if neighbor != nil && neighbor.HidesFaceOf(block) {
 							neighborModel := neighbor.Model
 							if neighborModel == nil {
 								neighborModel = model.CompileModel(neighbor.ID, neighbor.ModelSpec)
@@ -253,17 +264,23 @@ type cellSample struct {
 // is no reason to pretend an unloaded chunk contains a torch, so it stays 0.
 // A cell in an unloaded chunk is also treated as transparent, matching that
 // same "pretend it's open space" fallback rather than "pretend it's solid
-// rock", and consistent with GetBlockState already reporting air (nil) for
-// any position in a chunk that isn't loaded.
+// rock".
+//
+// transparent uses blocks.OpaqueToLight rather than a bare `block == nil`
+// check so a light-transparent block (leaves) is folded into the
+// smooth-lighting average exactly like air — the same property the light
+// engine itself uses to decide whether light passes through a cell (see
+// world/lighting.isTransparent), so the mesh's notion of "sees light" cannot
+// drift from the engine's.
 func sampleCell(world WorldReader, x, y, z int) cellSample {
 	block, _ := world.GetBlockState(x, y, z)
 	if !world.HasChunkAt(x, z) {
-		return cellSample{sky: 15, block: 0, transparent: block == nil, occludes: false}
+		return cellSample{sky: 15, block: 0, transparent: !blocks.OpaqueToLight(block), occludes: false}
 	}
 	return cellSample{
 		sky:         world.GetSkyLight(x, y, z),
 		block:       world.GetBlockLight(x, y, z),
-		transparent: block == nil,
+		transparent: !blocks.OpaqueToLight(block),
 		occludes:    occludes(block),
 	}
 }
@@ -276,10 +293,20 @@ func sampleCell(world WorldReader, x, y, z int) cellSample {
 // is light. Letting one occlude produces a dark halo on exactly the surfaces it
 // is illuminating, which reads as the lamp casting its own shadow.
 //
+// A light-transparent block (leaves) is excluded for the same reason light
+// itself passes through it: a solid canopy of leaves would otherwise force
+// every corner underneath it to the darkest AO level, which is exactly the
+// "hard black underside" the milestone calls out as the failure mode to
+// avoid. Leaves occlude nothing rather than occluding weakly, which is the
+// simpler of the two options the milestone allows and keeps this rule
+// expressed with the same LightTransparent property everything else uses,
+// rather than a fourth ad hoc case.
+//
 // Transparency still governs which cells contribute to the smooth-lighting
-// average, and an emitter is solid there — light does not pass through it.
+// average, and both an emitter and a leaf are solid there for occupancy
+// purposes but transparent for light-passing purposes — see sampleCell.
 func occludes(b *blocks.Block) bool {
-	return b != nil && b.LightLevel == 0
+	return b != nil && b.LightLevel == 0 && !b.LightTransparent
 }
 
 // faceAxes returns the two local-space axis indices (0=X, 1=Y, 2=Z) tangent
@@ -550,10 +577,13 @@ const cornerProbe = 0.25
 // because the two never touch. Testing occupancy alone made every slab cast a
 // full block's worth of occlusion.
 //
-// A light-emitting block never occludes: it is not blocking light, it is light.
+// A light-emitting block never occludes: it is not blocking light, it is
+// light. Neither does a light-transparent block (leaves): see occludes'
+// doc comment for why that reads as "occludes weakly or not at all" rather
+// than a hard black underside.
 func occludesCorner(world WorldReader, cx, cy, cz int, px, py, pz float32, scratch *[]model.Box) bool {
 	block, meta := world.GetBlockState(cx, cy, cz)
-	if block == nil || block.LightLevel > 0 {
+	if block == nil || block.LightLevel > 0 || block.LightTransparent {
 		return false
 	}
 

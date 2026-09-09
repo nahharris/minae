@@ -81,6 +81,12 @@ type Generator struct {
 	continentalSpline *noise.Spline
 	erosionSpline     *noise.Spline
 	peaksSpline       *noise.Spline
+
+	// worldSeed is the raw seed NewGenerator was built from, kept alongside
+	// the derived noise.Seed fields so features.go's per-chunk RNG (see
+	// newChunkRNG) can be seeded from it directly. It is never mutated after
+	// construction, same as everything else on Generator.
+	worldSeed int64
 }
 
 // NewGenerator builds a Generator for seed.
@@ -138,6 +144,7 @@ func NewGenerator(seed int64) *Generator {
 		continentalSpline: continentalSpline,
 		erosionSpline:     erosionSpline,
 		peaksSpline:       peaksSpline,
+		worldSeed:         seed,
 	}
 }
 

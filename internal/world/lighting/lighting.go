@@ -42,14 +42,17 @@ func (d direction) isDown() bool {
 	return d.DX == 0 && d.DY == -1 && d.DZ == 0
 }
 
-// isTransparent reports whether a block lets light pass through it. Air
-// always reads back as nil from World.GetBlock and Chunk.GetBlock, so this is
-// the one place to extend when translucent blocks such as glass or leaves are
-// added. The rule is the same for skylight and block light: a source cell may
-// itself be opaque (a glowstone still emits from its own cell), but light
-// never spreads through an opaque neighbour.
+// isTransparent reports whether a block lets light pass through it. It is
+// the negation of blocks.OpaqueToLight, not a separate `block == nil` check:
+// M18 added leaves, the first non-nil block that is transparent, and
+// world.Chunk.highestSolidY (the sky-ceiling optimisation's height) is
+// defined in terms of that exact same function — see OpaqueToLight's doc
+// comment for why routing both through one predicate is what keeps them from
+// silently disagreeing. The rule is the same for skylight and block light: a
+// source cell may itself be opaque (a glowstone still emits from its own
+// cell), but light never spreads through an opaque neighbour.
 func isTransparent(b *blocks.Block) bool {
-	return b == nil
+	return !blocks.OpaqueToLight(b)
 }
 
 // decayByOne returns from-1, saturating at 0. It is the falloff every

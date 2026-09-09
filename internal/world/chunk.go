@@ -14,17 +14,35 @@ type Chunk struct {
 	BlockLight [config.ChunkWidth * config.ChunkWidth * config.ChunkHeight]uint8
 	X, Z       int // Chunk coordinates in the world grid (not world position)
 
-	// highestSolidY is the Y of the highest non-air block anywhere in the
-	// chunk, or -1 if the chunk is entirely air. It is a single scalar for
-	// the whole chunk, not per column: lighting's column-scan ceiling
-	// optimization (see lighting.seedSkyLight) only needs "how high does
-	// this chunk's terrain reach at most", not a per-column height map.
+	// highestSolidY is the Y of the highest block anywhere in the chunk that
+	// the light engine considers opaque (blocks.OpaqueToLight), or -1 if no
+	// such block exists. It is a single scalar for the whole chunk, not per
+	// column: lighting's column-scan ceiling optimization (see
+	// lighting.seedSkyLight) only needs "how high does this chunk's terrain
+	// reach at most", not a per-column height map.
+	//
+	// It is deliberately defined as "opaque to light", not "non-air": M18
+	// added leaves, which are a real, solid, non-air block that light passes
+	// through anyway. A column through a canopy is genuinely full-brightness
+	// sky all the way down, so a leaf must not raise this value — if it did,
+	// the ceiling optimisation would still be *correct* (it only ever widens
+	// the set of cells enqueued, never narrows it below the true ceiling) but
+	// it would stop doing its job, since a leaf-block-tall "ceiling" would
+	// reappear in every chunk with a tree in its neighbourhood. Both
+	// SetBlock and SetBlockState below derive solidity from
+	// blocks.OpaqueToLightID -- a lock-free cache of the exact same
+	// blocks.OpaqueToLight function world/lighting.isTransparent negates,
+	// see that function's doc comment for why the cache exists -- rather
+	// than from a local `block != nil` check, specifically so the two
+	// cannot silently disagree about what "opaque" means. See
+	// docs/milestones/M18-vegetation-features.md's "light predicate and the
+	// sky ceiling must be the same predicate" design decision.
 	//
 	// It is maintained incrementally by SetBlock/SetBlockState rather than
 	// scanned on demand, since SeedChunk reads it on the hot chunk-loading
 	// path. Raising it is O(1); lowering it (only possible by removing the
-	// single highest block in the whole chunk) rescans, which is rare enough
-	// in practice not to matter.
+	// single highest opaque block in the whole chunk) rescans, which is rare
+	// enough in practice not to matter.
 	highestSolidY int
 }
 
@@ -72,7 +90,7 @@ func (c *Chunk) recomputeHighestSolidBelow(from int) {
 	for y := from; y >= 0; y-- {
 		base := y * config.ChunkWidth * config.ChunkWidth
 		for i := range config.ChunkWidth * config.ChunkWidth {
-			if c.Blocks[base+i] != blocks.InvalidNumericID {
+			if blocks.OpaqueToLightID(c.Blocks[base+i]) {
 				c.highestSolidY = y
 				return
 			}
@@ -141,11 +159,11 @@ func (c *Chunk) SetBlock(x, y, z int, block *blocks.Block) bool {
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
-	wasSolid := c.Blocks[index] != blocks.InvalidNumericID
+	wasSolid := blocks.OpaqueToLightID(c.Blocks[index])
 	c.Blocks[index] = blocks.NumericIDOf(block)
 	// Reset meta for convenience. Per-instance meta should be set via SetBlockState.
 	c.Meta[index] = 0
-	c.noteBlockChange(y, wasSolid, block != nil)
+	c.noteBlockChange(y, wasSolid, blocks.OpaqueToLight(block))
 	return true
 }
 
@@ -171,10 +189,10 @@ func (c *Chunk) SetBlockState(x, y, z int, block *blocks.Block, meta uint8) bool
 		return false
 	}
 	index := c.getBlockIndex(x, y, z)
-	wasSolid := c.Blocks[index] != blocks.InvalidNumericID
+	wasSolid := blocks.OpaqueToLightID(c.Blocks[index])
 	id := blocks.NumericIDOf(block)
 	c.Blocks[index] = id
-	c.noteBlockChange(y, wasSolid, id != blocks.InvalidNumericID)
+	c.noteBlockChange(y, wasSolid, blocks.OpaqueToLight(block))
 	if id == blocks.InvalidNumericID {
 		c.Meta[index] = 0
 		return true
