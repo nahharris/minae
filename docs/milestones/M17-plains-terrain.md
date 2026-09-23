@@ -13,7 +13,7 @@ the decision recorded below — no fantasy yet.
 
 The magi-tech identity is deliberately absent from this pass. The generator gets
 honest and boring first; the fantasy arrives once the biome framework in
-[M19](M19-data-driven-biomes.md) exists to hold it data-drivenly, rather than
+[M19](M19-biome-selection.md) exists to hold it data-drivenly, rather than
 being hardcoded here and then unpicked.
 
 That is worth stating because the first thing anyone sees will look generic, and
