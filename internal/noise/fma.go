@@ -48,3 +48,14 @@ func madd(a, b, c float64) float64 {
 func dot2(ax, ay, bx, by float64) float64 {
 	return math.FMA(ax, bx, ay*by)
 }
+
+// dot3 returns the 3D dot product (ax, ay, az) . (bx, by, bz), by chaining two
+// FMA calls: the inner one folds the first two terms exactly the way dot2
+// folds its whole two-term product, and the outer one folds the third term
+// into that already-rounded result. Both are single calls to math.FMA, so
+// each step is exactly rounded and identical on every architecture -- the
+// same guarantee dot2 gives, extended by one more term for Eval3D
+// (opensimplex3.go).
+func dot3(ax, ay, az, bx, by, bz float64) float64 {
+	return math.FMA(az, bz, math.FMA(ax, bx, ay*by))
+}

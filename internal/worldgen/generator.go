@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/nahharris/minae/internal/noise"
+	"github.com/nahharris/minae/internal/platform/config"
 )
 
 // SeaLevel is the reference height the splines below are shaped around.
@@ -97,6 +98,14 @@ type Generator struct {
 	temperature noise.Seed
 	humidity    noise.Seed
 	mysticness  noise.Seed
+
+	// detail is M20's 3D noise field (density.go): the genuinely-3D term
+	// sampled at cell corners and trilinearly interpolated. Derived from
+	// seed+6, continuing the same seed+k derivation the six climate fields
+	// above already use -- M17 measured that this produces no cross-seed
+	// correlation for k up to 2, and nothing about that measurement depends
+	// on which k values are used.
+	detail noise.Seed
 
 	continentalSpline *noise.Spline
 	erosionSpline     *noise.Spline
@@ -193,6 +202,7 @@ func newGeneratorWithBiomes(seed int64, biomes *BiomeSet) *Generator {
 		temperature:        noise.NewSeed(seed + 3),
 		humidity:           noise.NewSeed(seed + 4),
 		mysticness:         noise.NewSeed(seed + 5),
+		detail:             noise.NewSeed(seed + 6),
 		continentalSpline:  continentalSpline,
 		erosionSpline:      erosionSpline,
 		peaksSpline:        peaksSpline,
@@ -294,8 +304,45 @@ func (g *Generator) heightAndClimate(x, z int) (height int, climate ClimatePoint
 // identically in every chunk, with a wall at every seam -- see the
 // milestone's design decision on why this is the single most likely bug in
 // this package.
+//
+// Since M20, this is density-aware, not just the 2D heightmap: it returns
+// one past the highest solid cell in the column, which can sit above or
+// below the heightmap-only answer wherever `detail` is non-zero -- an
+// overhang's lip is still "the highest solid cell", exactly as the
+// milestone's "SurfaceHeight survives, redefined" design decision states.
+// See density.go's solidAt: this reads the exact same interpolated field
+// Generate fills blocks from (the milestone's "one field, one path"
+// refinement), via the same bounded-band scan Generate's fast path uses, so
+// feature placement and spawn -- both unchanged call sites -- see a ground
+// height that always agrees with what actually got painted into a chunk.
 func (g *Generator) SurfaceHeight(x, z int) int {
-	return g.clampHeight(g.rawSurfaceHeight(x, z))
+	h := g.clampHeight(g.rawSurfaceHeight(x, z))
+
+	lo := h - surfaceHeightBand
+	if lo < 0 {
+		lo = 0
+	}
+	hi := h + surfaceHeightBand
+	if hi >= config.ChunkHeight {
+		hi = config.ChunkHeight - 1
+	}
+
+	// Outside [lo, hi], solidAt's own fast path already proves the answer:
+	// solid below lo, air above hi. Scanning top-down inside the band finds
+	// the highest solid cell directly; density can only disagree with the
+	// heightmap-only formula inside this band (see detailBand's comment), so
+	// nothing outside it needs to be examined.
+	col := g.newColumnDetail(x, z, lo, hi)
+	for y := hi; y >= lo; y-- {
+		if col.solidAt(y, h) {
+			return y + 1
+		}
+	}
+
+	// Nothing solid anywhere in the band: since y=lo-1 (just below it) is
+	// guaranteed solid by the same bound, the highest solid cell is lo-1, so
+	// the first air block above it is lo.
+	return lo
 }
 
 // rawSurfaceHeight is SurfaceHeight without the clamp: the height the noise

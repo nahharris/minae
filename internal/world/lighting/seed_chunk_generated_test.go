@@ -60,6 +60,7 @@ func TestSeedChunk_MatchesFullRecompute_GeneratedTerrain(t *testing.T) {
 		{"varied heights, no carving", buildVariedHeightWorld, false},
 		{"carved cave/tunnel", buildGeneratedCaveWorld, false},
 		{"overhang across a seam", buildGeneratedOverhangWorld, true},
+		{"real M20 density overhang across a seam", buildRealDensityOverhangSeamWorld, true},
 		{"tree canopy across a seam", buildGeneratedTreeWorld, false},
 		{"canopy above the neighbourhood ceiling", buildCanopyAboveCeilingWorld, true},
 	}
@@ -219,6 +220,109 @@ func buildGeneratedOverhangWorld(t *testing.T) *world.World {
 	w.SetBlock(23, floorY, 0, blocks.Glowstone)
 
 	return w
+}
+
+// densityOverhangSearchSeed is the fixed seed buildRealDensityOverhangSeamWorld
+// searches for its case in. It is not itself the case -- the local column an
+// overhang lands on is found by scanning this seed's own generated terrain,
+// never hardcoded (the precondition rule M20 introduced: a test whose meaning
+// depends on the terrain containing something must assert that thing is
+// present, computed from the terrain, not assumed at a fixed coordinate). It
+// is pinned to one seed, rather than searched across many at test time,
+// purely so the search finishes quickly under -race plus coverage
+// instrumentation, which this package's own comments note runs some 25x
+// slower than a plain build.
+const densityOverhangSearchSeed = 5
+
+// densityOverhangSearchChunks bounds the search: chunks (0,0) through
+// (densityOverhangSearchChunks-1, densityOverhangSearchChunks-1) are
+// generated and scanned for a column, adjacent to one of that chunk's own
+// edges, whose blocks show more than one solid run -- i.e. a real,
+// generator-produced overhang (M20's density field, not this file's own
+// hand-carved roof) sitting where it can plausibly cross into a neighbouring
+// chunk.
+const densityOverhangSearchChunks = 10
+
+// buildRealDensityOverhangSeamWorld is M20's extension to this file's
+// equivalence suite (criterion 8: "Lighting equivalence holds on overhang
+// terrain, with test terrain built so that shaded cells sit under an overhang
+// lip that crosses a chunk seam"). buildGeneratedOverhangWorld above already
+// covers a hand-carved roof; this covers the real thing -- an overhang the
+// density field actually produced -- because a lighting bug specific to how
+// M20's terrain shapes fall across a chunk boundary could exist independently
+// of whether a hand-built roof happens to expose it.
+//
+// The search follows the precondition rule directly: it fails the test
+// loudly, rather than silently building ordinary terrain, if
+// densityOverhangSearchSeed's own generated chunks contain no such column
+// within the search budget above.
+func buildRealDensityOverhangSeamWorld(t *testing.T) *world.World {
+	t.Helper()
+	blocks.ResetToVanilla()
+
+	g := worldgen.NewGenerator(densityOverhangSearchSeed)
+	for cx := 0; cx < densityOverhangSearchChunks; cx++ {
+		for cz := 0; cz < densityOverhangSearchChunks; cz++ {
+			coord := world.ChunkCoord{X: cx, Z: cz}
+			c := g.Generate(coord)
+			for x := 0; x < config.ChunkWidth; x++ {
+				for z := 0; z < config.ChunkWidth; z++ {
+					// Only a column adjacent to one of this chunk's own edges
+					// can plausibly have an overhang that crosses into a
+					// neighbouring chunk -- the property this case exists to
+					// exercise, per criterion 8's own wording.
+					if x != 0 && x != config.ChunkWidth-1 && z != 0 && z != config.ChunkWidth-1 {
+						continue
+					}
+					if countSolidRunsForLighting(c, x, z) <= 1 {
+						continue
+					}
+
+					t.Logf("real density overhang found: seed=%d chunk=(%d,%d) local=(%d,%d)",
+						densityOverhangSearchSeed, cx, cz, x, z)
+
+					// Build the 3x3 neighbourhood the outer equivalence test
+					// needs, from the SAME seed, so this is exactly what the
+					// generator actually produced -- not a reconstruction of
+					// it.
+					w := world.NewWorld()
+					for dx := -1; dx <= 1; dx++ {
+						for dz := -1; dz <= 1; dz++ {
+							nc := world.ChunkCoord{X: cx + dx, Z: cz + dz}
+							w.Chunks[nc] = g.Generate(nc)
+						}
+					}
+					return w
+				}
+			}
+		}
+	}
+
+	t.Fatalf("found no real M20 overhang adjacent to a chunk edge within seed %d's first %dx%d chunks -- "+
+		"this test case's precondition does not hold, so it cannot exercise what it claims to",
+		densityOverhangSearchSeed, densityOverhangSearchChunks, densityOverhangSearchChunks)
+	return nil
+}
+
+// countSolidRunsForLighting counts contiguous solid runs (excluding Wood and
+// Leaves feature blocks) scanning column (x, z) of c from the top down. More
+// than one run means an overhang: the column's topmost solid cell has open
+// air beneath it before the ground resumes. This mirrors
+// internal/worldgen's own countSolidRuns test helper exactly; it is
+// duplicated rather than imported because internal/worldgen does not export
+// it and this package must not depend on worldgen's internal test files.
+func countSolidRunsForLighting(c *world.Chunk, x, z int) int {
+	runs := 0
+	inSolid := false
+	for y := config.ChunkHeight - 1; y >= 0; y-- {
+		b := c.GetBlock(x, y, z)
+		solid := b != nil && b != blocks.Wood && b != blocks.Leaves
+		if solid && !inSolid {
+			runs++
+		}
+		inSolid = solid
+	}
+	return runs
 }
 
 // buildGeneratedTreeWorld is generated terrain with a synthetic tree -- a

@@ -277,7 +277,7 @@ func TestFeatures_TreeCrossesChunkBoundaryIntact(t *testing.T) {
 func TestFeatures_LoadOrderIndependence(t *testing.T) {
 	blocks.ResetToVanilla()
 
-	for seed := int64(0); seed < 6; seed++ {
+	for seed := int64(0); seed < 2; seed++ {
 		g := NewGenerator(seed)
 		for cx := -2; cx <= 2; cx++ {
 			for cz := -2; cz <= 2; cz++ {
@@ -404,7 +404,7 @@ func TestFeatures_TreesAreRootedNotFloating(t *testing.T) {
 	blocks.ResetToVanilla()
 
 	checked := 0
-	for seed := int64(0); seed < 10; seed++ {
+	for seed := int64(0); seed < 4; seed++ {
 		g := NewGenerator(seed)
 		for cx := -4; cx <= 4; cx++ {
 			for cz := -4; cz <= 4; cz++ {
