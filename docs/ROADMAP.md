@@ -8,8 +8,11 @@ The design behind milestones 1-4 is
 [2026-09-05 lighting and foundations](superpowers/specs/2026-09-05-lighting-and-foundations-design.md).
 
 The lighting backlog is finished (M1-M7 done, M8 skipped). M12 landed the physics
-core and M13 wired it to the player. Next is the world itself: M14-M19 cover
-streaming, generation and biomes.
+core and M13 wired it to the player. M14-M18 built the world: streaming, noise,
+terrain and vegetation. M19-M22 turn it into many places — biomes, density
+terrain, caves, and the first magi-tech content. Every world-generation
+milestone inherits the constraints in
+[worldgen-constraints](design/worldgen-constraints.md).
 
 | # | Milestone | Status | Goal |
 |---|-----------|--------|------|
@@ -28,7 +31,10 @@ streaming, generation and biomes.
 | [M16](milestones/M16-noise-foundation.md) | Noise foundation | ✅ Done | Deterministic OpenSimplex2, fBm, domain warping, splines |
 | [M17](milestones/M17-plains-terrain.md) | Plains terrain | ✅ Done | Real ground: continentalness, erosion, peaks-and-valleys through splines |
 | [M18](milestones/M18-vegetation-features.md) | Trees and bushes | ✅ Done | The first features, and the first transparent block |
-| [M19](milestones/M19-data-driven-biomes.md) | Data-driven biomes | 📋 Planned | Multi-noise parameter space including mysticness; 3D density |
+| [M19](milestones/M19-biome-selection.md) | Biome selection | 📋 Planned | Climate axes including mysticness; data-driven surfaces and features; terrain shape untouched |
+| [M20](milestones/M20-density-terrain.md) | Density terrain | 📋 Planned | The heightmap becomes a 3D density field, anchored to reproduce M17 exactly |
+| [M21](milestones/M21-caves.md) | Caves | 📋 Planned | Noise caves carved as density subtraction |
+| [M22](milestones/M22-mysticness.md) | Mysticness | 📋 Planned | The first magi-tech biome, and floating islands — rare on purpose |
 
 Status legend: 📋 Planned · 🚧 In progress · ✅ Done · ⏭️ Skipped
 
@@ -49,9 +55,9 @@ would make the game most playable soonest.
 - Player collision and gravity: done in [M12](milestones/M12-collision-core.md) and
   [M13](milestones/M13-player-controller.md). Sprinting, crouching and fall damage
   are still open, as is a general entity system.
-- Noise-based terrain generation: planned as [M16](milestones/M16-noise-foundation.md),
+- Noise-based terrain generation: done in [M16](milestones/M16-noise-foundation.md),
   [M17](milestones/M17-plains-terrain.md) and [M18](milestones/M18-vegetation-features.md).
-- Chunk streaming: planned as [M14](milestones/M14-async-chunk-pipeline.md) and
+- Chunk streaming: done in [M14](milestones/M14-async-chunk-pipeline.md) and
   [M15](milestones/M15-chunk-streaming.md).
 - World persistence: save and load chunks, player state and time to disk
 
@@ -70,14 +76,15 @@ would make the game most playable soonest.
 **Rendering performance**
 - Frustum culling
 - Greedy meshing
-- Background-thread mesh generation
 - Level of detail for distant chunks
 
 **Content**
-- Multiple biomes, caves, oceans and floating islands: sketched in
-  [M19](milestones/M19-data-driven-biomes.md), which is where the magi-tech identity
-  is meant to land.
-- Transparent blocks (glass, leaves) — the vertex alpha channel is freed for this in M4
+- Biomes, caves and floating islands: planned as
+  [M19](milestones/M19-biome-selection.md)–[M22](milestones/M22-mysticness.md).
+  Oceans are still unscheduled: they need water, which needs liquids.
+- Transparent blocks: leaves done in [M18](milestones/M18-vegetation-features.md).
+  Glass and other see-through blocks are still open; the vertex alpha channel
+  freed in M4 is still unused
 - Liquids, stairs, fences, doors
 - Tool tiers, block hardness, item drops
 - Entities, mobs, dropped items
