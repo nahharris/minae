@@ -1,0 +1,29 @@
+# forest -- temperate, humid. Grass surface over dirt filler, with dense
+# trees. See docs/milestones/M19-biome-selection.md.
+id: minae/forest
+surface: minae/grass
+filler: minae/dirt
+
+point:
+  continentalness: 0.0
+  erosion: 0.0
+  peaks_and_valleys: 0.0
+  temperature: 0.0
+  humidity: 0.65
+  mysticness: -1.0
+weights:
+  continentalness: 0.02
+  erosion: 0.02
+  peaks_and_valleys: 0.02
+  temperature: 1.0
+  humidity: 1.0
+  mysticness: 0.05
+
+# Dense trees, and bushes filling in around them.
+features:
+  - kind: tree
+    numerator: 3
+    denominator: 5
+  - kind: bush
+    numerator: 1
+    denominator: 3

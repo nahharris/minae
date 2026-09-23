@@ -89,6 +89,13 @@ milestone reports, before and after:
 
 A regression is not automatically a blocker, but it is never a surprise.
 
+**Measure before and after interleaved, not in batches.** Compile both builds
+once, then alternate them for several rounds so background load lands on both
+equally. M19's review produced a plausible 14% lighting regression twice over —
+once in the implementation's report, once in review — by running each build in
+its own batch while machine load drifted. Interleaved, the difference vanished.
+A regression reported from batch runs is a hypothesis, not a finding.
+
 ## 7. The light predicate and the sky ceiling stay one predicate
 
 `Chunk.highestSolidY` and the light engine both derive "opaque" from

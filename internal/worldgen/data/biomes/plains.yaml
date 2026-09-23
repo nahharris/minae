@@ -1,0 +1,36 @@
+# plains -- temperate, middling humidity. Grass surface over dirt filler,
+# with sparse bushes and rare trees. See docs/milestones/M19-biome-selection.md.
+id: minae/plains
+surface: minae/grass
+filler: minae/dirt
+
+# point and weights together place this biome in the six-axis climate space
+# (internal/worldgen/biome.go's Axis constants). continentalness, erosion,
+# peaks_and_valleys and mysticness are all held near neutral/low with a small
+# weight: plains should not care where it sits on those axes. temperature and
+# humidity dominate the choice between the three ordinary biomes, per the
+# milestone's "weighting per axis is allowed" design decision.
+point:
+  continentalness: 0.0
+  erosion: 0.0
+  peaks_and_valleys: 0.0
+  temperature: 0.0
+  humidity: 0.0
+  mysticness: -1.0
+weights:
+  continentalness: 0.02
+  erosion: 0.02
+  peaks_and_valleys: 0.02
+  temperature: 1.0
+  humidity: 1.0
+  mysticness: 0.05
+
+# Sparse bushes, rare trees: low density for both, bushes somewhat more
+# common than trees.
+features:
+  - kind: bush
+    numerator: 1
+    denominator: 4
+  - kind: tree
+    numerator: 1
+    denominator: 12

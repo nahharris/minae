@@ -37,6 +37,12 @@ var (
 	Wood      = Register(&Block{ID: "minae/wood", Name: "Wood", Color: 0x8B4513FF})
 	Glowstone = Register(&Block{ID: "minae/glowstone", Name: "Glowstone", Color: 0xFFD98CFF, LightLevel: 15})
 
+	// Sand and Sandstone are dunes' surface and filler (M19): the first
+	// biome whose ground looks different from plains' and forest's grass,
+	// which is what makes biome selection visible rather than merely tested.
+	Sand      = Register(&Block{ID: "minae/sand", Name: "Sand", Color: 0xE3D6A0FF})
+	Sandstone = Register(&Block{ID: "minae/sandstone", Name: "Sandstone", Color: 0xC2B280FF})
+
 	// Leaves is the first block for which "transparent" splits into more than
 	// one property (see block.go's OpaqueToLight and HidesFaceOf, and
 	// docs/milestones/M18-vegetation-features.md): light passes through it
@@ -55,7 +61,7 @@ var (
 
 // vanillaBlocks returns every built-in block, in registration order.
 func vanillaBlocks() []*Block {
-	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood, Glowstone, Leaves}
+	return []*Block{Air, Stone, StoneSlab, Dirt, Grass, Wood, Glowstone, Leaves, Sand, Sandstone}
 }
 
 // ResetToVanilla clears the registry and re-registers the built-in blocks.

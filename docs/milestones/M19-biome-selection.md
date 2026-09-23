@@ -1,6 +1,6 @@
 # M19 — Biome selection
 
-**Status:** 📋 Planned
+**Status:** ✅ Done
 **Depends on:** [M17](M17-plains-terrain.md), [M18](M18-vegetation-features.md)
 **Inherits:** [world-generation constraints](../design/worldgen-constraints.md)
 
@@ -199,3 +199,99 @@ much heavier accumulation M20 brings.
 Any change to terrain shape, caves, 3D density, a mystic biome, biome-tinted
 grass or foliage colours, surface blending, water, and anything where a biome
 affects behaviour rather than appearance.
+
+## Result
+
+Three biomes — plains, forest, dunes — chosen by weighted nearest-neighbour
+selection across six climate axes, defined in embedded YAML and validated at
+load. Terrain shape is untouched. Sand and sandstone are registered for dunes.
+Coverage 66.5%, `internal/worldgen` at 93%.
+
+Every design decision survived implementation as written.
+
+### The new guard's first catch was in M18's code
+
+Extending the FMA codegen guard to `internal/worldgen` failed immediately, and
+not on anything this milestone wrote. M18's tree spacing check, `tooClose`,
+computed `dx*dx + dz*dz` bare — the exact shape arm64 fuses and amd64 does not.
+
+So since M18, **the same seed could place trees differently on Apple Silicon
+than on x86.** Only near the spacing threshold, and only for some candidates,
+which is precisely the kind of divergence nobody would notice until two players
+compared screenshots. It now routes through `addProduct`.
+
+This is constraint 3 working as intended, and it is the argument for the guard
+over the comment. M17 decided the package needed no guard because it had a
+single accumulation site "visible by inspection"; M18 then added a second one
+that nobody inspected. A rule that depends on remembering to look is a rule
+that eventually is not followed.
+
+Side effect worth knowing: fusing that expression changes its rounding on amd64
+too, so a few tree placements near the spacing threshold may shift for existing
+seeds. There is no world persistence yet, so no saved world is affected.
+
+### Criterion 1 is guarded on both height paths
+
+Generation now computes height and climate together (`heightAndClimate`) to
+share the three terrain samples between them, while spawn and the tests call
+`SurfaceHeight`. That is two paths to the same number, and biome-dependent
+terrain could creep into either.
+
+The implementation's mutation targeted `SurfaceHeight`. Review repeated it on
+the path that actually fills chunks — a height offset applied only in forest
+columns — and it is caught by `TestSurfaceAndFillerFollowBiome`, which checks
+generated blocks against `SurfaceHeight`. So the guarantee holds on both paths,
+by agreement rather than by criterion 1's own test, which is adequate.
+
+### A lighting regression that was not there
+
+The implementation reported cold-neighbour lighting slowing 14%, from 3.35 to
+3.81 ms — uncomfortably close to the 4 ms per-frame budget — and attributed it
+to generation cost leaking into the benchmark. That attribution cannot be
+right, since the benchmark stops its timer while generating.
+
+Checking the actual input made it stranger: the benchmark region now holds 50
+leaf blocks instead of 439, because biome selection placed it in plains with
+sparse bushes rather than trees. The lighting code is unchanged and its input
+got *simpler*. A slowdown would need an explanation that did not exist.
+
+Measured properly — both builds compiled once, then run alternately for four
+rounds so machine load hits both equally — there is no regression:
+
+| | before | after |
+|---|---|---|
+| warm | 2.33 ms | 2.43 ms |
+| cold | 3.15 ms | 3.15 ms |
+
+The "after" build wins three of the four cold rounds. The reported 14%, and a
+first review measurement that seemed to confirm it, both came from running each
+build in a separate batch while background load drifted. **Before/after
+benchmarks in this project should be interleaved from now on** — a batch-by-batch
+comparison produced a plausible-looking regression twice over.
+
+### What did cost something
+
+Generation went from 274 µs to 367 µs per chunk, +34%. Three more fBm fields
+per column is a genuine cost of six-axis climate; sharing the terrain samples
+between height and biome selection brought a naive +67% down to that. It runs on
+the worker pool, so it shows up as chunks arriving slightly later, not as frame
+time.
+
+### Biomes are large, perhaps too large to find
+
+Climate fields use a wavelength of 1,000 blocks so regions read as places, and
+the coherence criterion is comfortably met: adjacent columns disagree under 2%
+of the time. The flip side is that dunes, the rarest biome, can sit 700 or more
+blocks from spawn on some seeds.
+
+That is a play question, not a test one, and it is on the manual checklist
+rather than decided here. If deserts feel like a rumour, the climate frequency
+is a single constant.
+
+### One criterion is tested only synthetically
+
+Dropping the mysticness axis from the distance changes nothing for the vanilla
+set, because all three biomes sit at the same low mysticness with the same
+weight. The mutation is caught by the randomised biome-set test instead, not by
+the vanilla one — correct, and expected until M22 gives mysticness something to
+separate.
