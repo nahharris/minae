@@ -94,6 +94,97 @@ func TestGenerate_FeaturesNeverWriteOutsideDeclaredRadius(t *testing.T) {
 	}
 }
 
+// findChunkRootedIn searches outward from the origin, in a fixed spiral
+// order, for a chunk coordinate that has an accepted candidate root of its
+// own (r.coord == coord) whose root-column biome is wantID. It only ever
+// calls rootsAffecting/selectBiome -- no Generate -- which is what makes
+// searching a wide area affordable: Generate fills 256 columns x 256 blocks
+// of height, rootsAffecting does neither.
+//
+// It reports ok=false if no such chunk exists within maxChunkRadius, so
+// callers can fail loudly (constraints doc's "range criterion has two
+// halves") rather than silently testing nothing.
+func findChunkRootedIn(g *Generator, wantID string, maxChunkRadius int) (coord world.ChunkCoord, ok bool) {
+	for r := 0; r <= maxChunkRadius; r++ {
+		for cx := -r; cx <= r; cx++ {
+			for cz := -r; cz <= r; cz++ {
+				if absOffset(cx) != r && absOffset(cz) != r {
+					continue // only the ring at exactly this radius; smaller rings were already tried
+				}
+				c := world.ChunkCoord{X: cx, Z: cz}
+				for _, root := range g.rootsAffecting(c) {
+					if root.coord == c && g.selectBiome(root.globalX(), root.globalZ()).ID == wantID {
+						return c, true
+					}
+				}
+			}
+		}
+	}
+	return world.ChunkCoord{}, false
+}
+
+// TestGenerate_FeaturesNeverWriteOutsideDeclaredRadius_AllBiomes is the same
+// check as the test above, but deliberately steered (via findChunkRootedIn)
+// into a representative chunk of each of the three vanilla biomes, rather
+// than sampling a fixed area and hoping all three turn up. M19 moves
+// features into biome definitions -- different densities per biome, no
+// features at all in dunes -- so a radius-enforcement test that only ever
+// happens to sample plains would not actually be testing what M19 changed:
+// the milestone's own "M18's radius-enforcement test must now cover all
+// biomes" requirement, taken literally.
+//
+// Each representative's own 5x5 chunk neighbourhood is generated and
+// checked (not just the one chunk), so features rooted near its edges --
+// including ones that cross into a neighbouring, differently-biomed chunk,
+// which the milestone explicitly allows -- are covered too.
+func TestGenerate_FeaturesNeverWriteOutsideDeclaredRadius_AllBiomes(t *testing.T) {
+	blocks.ResetToVanilla()
+
+	const searchChunkRadius = 60 // generous; findChunkRootedIn only calls rootsAffecting, which is cheap
+
+	checked := 0
+	for seed := int64(0); seed < 2; seed++ {
+		g := NewGenerator(seed)
+
+		for _, id := range []string{"minae/plains", "minae/forest", "minae/dunes"} {
+			center, ok := findChunkRootedIn(g, id, searchChunkRadius)
+			if !ok {
+				t.Fatalf("seed %d: no chunk within %d of the origin has a root of its own rooted in biome %q -- "+
+					"widen searchChunkRadius so this test actually covers every biome", seed, searchChunkRadius, id)
+			}
+
+			for cx := center.X - 2; cx <= center.X+2; cx++ {
+				for cz := center.Z - 2; cz <= center.Z+2; cz++ {
+					coord := world.ChunkCoord{X: cx, Z: cz}
+					roots := g.rootsAffecting(coord)
+					c := g.Generate(coord)
+
+					for x := range config.ChunkWidth {
+						gx := coord.X*config.ChunkWidth + x
+						for z := range config.ChunkWidth {
+							gz := coord.Z*config.ChunkWidth + z
+							for y := range config.ChunkHeight {
+								b := c.GetBlock(x, y, z)
+								if b != blocks.Wood && b != blocks.Leaves {
+									continue
+								}
+								checked++
+								if !withinSomeRootRadius(roots, gx, gz) {
+									t.Fatalf("seed %d chunk (%d,%d) (near biome %q representative): %s at global (%d,%d,%d) is outside every known root's declared radius",
+										seed, cx, cz, id, b.ID, gx, y, gz)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no feature blocks were found across the sampled seeds/chunks -- test is not exercising anything")
+	}
+}
+
 // TestFeatures_TreeCrossesChunkBoundaryIntact is validation criterion 3,
 // checked directly and deterministically: a tree rooted at each of the four
 // boundary positions (west, east, north, south edge of its chunk) must have
@@ -112,6 +203,8 @@ func TestGenerate_FeaturesNeverWriteOutsideDeclaredRadius(t *testing.T) {
 // neighbouring chunk at all.
 func TestFeatures_TreeCrossesChunkBoundaryIntact(t *testing.T) {
 	blocks.ResetToVanilla()
+
+	_, featureChunkRadius, _ := deriveFeatureRadii(DefaultBiomes())
 
 	const groundY = 64
 	const trunkHeight = 5
@@ -267,8 +360,8 @@ func TestFeatures_AcceptanceConsistentAcrossQueryOrigin(t *testing.T) {
 				home := world.ChunkCoord{X: cx, Z: cz}
 				fromHome := acceptedOwnRoots(g, home, home)
 
-				for ddx := -featureChunkRadius; ddx <= featureChunkRadius; ddx++ {
-					for ddz := -featureChunkRadius; ddz <= featureChunkRadius; ddz++ {
+				for ddx := -g.featureChunkRadius; ddx <= g.featureChunkRadius; ddx++ {
+					for ddz := -g.featureChunkRadius; ddz <= g.featureChunkRadius; ddz++ {
 						if ddx == 0 && ddz == 0 {
 							continue
 						}

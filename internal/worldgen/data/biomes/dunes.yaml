@@ -1,0 +1,25 @@
+# dunes -- hot, dry. Sand surface over sandstone filler. No features: a
+# visibly different biome with no vegetation is the clearest possible proof
+# that selection (and not just the surface painter) is working. See
+# docs/milestones/M19-biome-selection.md.
+id: minae/dunes
+surface: minae/sand
+filler: minae/sandstone
+
+point:
+  continentalness: 0.0
+  erosion: 0.0
+  peaks_and_valleys: 0.0
+  temperature: 0.8
+  humidity: -0.8
+  mysticness: -1.0
+weights:
+  continentalness: 0.02
+  erosion: 0.02
+  peaks_and_valleys: 0.02
+  temperature: 1.0
+  humidity: 1.0
+  mysticness: 0.05
+
+# Deliberately empty: dunes has no features.
+features: []

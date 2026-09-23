@@ -48,10 +48,6 @@ const (
 	// bushRadius is bushShape's equivalent bound.
 	bushRadius = 1
 
-	// maxFeatureRadius is the largest radius any feature declares. It is
-	// what featureChunkRadius is derived from.
-	maxFeatureRadius = treeRadius
-
 	// minTrunkHeight and trunkHeightRange bound a tree's randomly chosen
 	// trunk height to [minTrunkHeight, minTrunkHeight+trunkHeightRange): 4,
 	// 5 or 6 blocks. This does not affect treeRadius — every layer in
@@ -85,46 +81,63 @@ const (
 	// to spare.
 	minSpacing = 6.0
 
-	// featureChunkRadius is how many chunks in every direction, beyond the
-	// one being generated, must be considered for roots whose geometry could
-	// reach in: ceil(maxFeatureRadius / config.ChunkWidth). maxFeatureRadius
-	// (2) is far inside one chunk width (16), so this is 1 — matching the
-	// milestone's own "(2r+1)^2 at r=1" estimate for the extra generation
-	// cost.
-	featureChunkRadius = 1
-
-	// spacingChunkRadius is the same ceiling division applied to minSpacing:
-	// how many chunks away a candidate that could reject (or be rejected by)
-	// another one can be.
+	// spacingChunkRadius is the ceiling division of minSpacing by chunk
+	// width: how many chunks away a candidate that could reject (or be
+	// rejected by) another one can be. minSpacing is a fixed property of the
+	// Poisson-disk placement itself, not of any one biome's features, so
+	// unlike featureChunkRadius and poolRadius below it stays a constant.
 	spacingChunkRadius = 1
-
-	// poolRadius is how far the candidate pool gathered when generating one
-	// chunk must reach. Deciding the fate of a root up to featureChunkRadius
-	// chunks away requires knowing about every earlier-ordered candidate
-	// within minSpacing of it, which can itself be up to spacingChunkRadius
-	// chunks further out — so the pool must cover both radii from the chunk
-	// being generated. See rootsAffecting.
-	poolRadius = featureChunkRadius + spacingChunkRadius
 )
 
-func init() {
-	// Defensive: if these constants are ever retuned independently, a
-	// mismatch here would silently reintroduce exactly the correctness bug
-	// the milestone's "feature radius is declared, bounded, and enforced"
-	// design decision exists to prevent — a feature or a spacing check
-	// reaching further than the chunk-radius constants assume. Panicking at
-	// package init turns that into a build-time-obvious failure instead of a
-	// silent one, matching how NewGenerator already panics on a malformed
-	// spline rather than producing subtly wrong terrain.
+// featureRadiusFor returns the declared horizontal radius of one feature
+// kind: the single place that maps a featureKind to the shape-function bound
+// it corresponds to (treeShape/treeRadius, bushShape/bushRadius). biome.go's
+// maxFeatureRadiusOf calls this once per declared feature to compute the
+// milestone's "maximum over every feature in every biome" from whatever the
+// loaded biome data actually declares, rather than from an assumption baked
+// in at compile time.
+func featureRadiusFor(kind featureKind) int {
+	switch kind {
+	case featureTree:
+		return treeRadius
+	case featureBush:
+		return bushRadius
+	default:
+		return 0
+	}
+}
+
+// deriveFeatureRadii computes (maxFeatureRadius, featureChunkRadius,
+// poolRadius) for bs, and panics if the result would violate an invariant
+// every other function in this file relies on -- the same defensive check
+// M18 ran once at package init, moved here because the radius it checks is
+// now a property of loaded data rather than a compile-time constant.
+// Panicking rather than returning an error matches NewGenerator's existing
+// treatment of a malformed spline: this can only be wrong because of a bug
+// in this package or its embedded data, never because of anything a player
+// did.
+func deriveFeatureRadii(bs *BiomeSet) (maxFeatureRadius, featureChunkRadius, poolRadius int) {
+	maxFeatureRadius = maxFeatureRadiusOf(bs)
+
+	// ceil(maxFeatureRadius / config.ChunkWidth), computed without float
+	// division.
+	featureChunkRadius = (maxFeatureRadius + config.ChunkWidth - 1) / config.ChunkWidth
+	if featureChunkRadius < 1 {
+		featureChunkRadius = 1
+	}
+
 	if maxFeatureRadius > featureChunkRadius*config.ChunkWidth {
 		panic("worldgen: maxFeatureRadius exceeds featureChunkRadius*ChunkWidth")
 	}
 	if minSpacing > float64(spacingChunkRadius*config.ChunkWidth) {
 		panic("worldgen: minSpacing exceeds spacingChunkRadius*ChunkWidth")
 	}
-	if minSpacing <= 2*maxFeatureRadius {
+	if maxFeatureRadius > 0 && minSpacing <= 2*float64(maxFeatureRadius) {
 		panic("worldgen: minSpacing does not leave features room to avoid overlapping")
 	}
+
+	poolRadius = featureChunkRadius + spacingChunkRadius
+	return maxFeatureRadius, featureChunkRadius, poolRadius
 }
 
 // featureBlock is one block a feature places, relative to its root column
@@ -209,6 +222,15 @@ type rootCandidate struct {
 	lx, lz      int
 	kind        featureKind
 	trunkHeight int // meaningful only when kind == featureTree
+
+	// densityRoll is a raw splitmix64 draw, independent of kind/lx/lz/
+	// trunkHeight, consumed by the root's biome's FeatureDef.accepts (see
+	// Generator.biomeAllows) to decide whether this candidate actually
+	// becomes a feature. Drawing it here, unconditionally, keeps
+	// candidateRoots free of any dependency on biome selection: the same
+	// candidates are proposed regardless of which biomes exist, and only
+	// biomeAllows -- consulted afterwards -- decides which of them survive.
+	densityRoll uint64
 }
 
 func (r rootCandidate) globalX() int { return r.coord.X*config.ChunkWidth + r.lx }
@@ -237,10 +259,19 @@ func (r rootCandidate) before(o rootCandidate) bool {
 
 // tooClose reports whether two candidates are within minSpacing of each
 // other, centre to centre.
+//
+// distSq's dz*dz is a pure product with no addition attached to it in this
+// expression -- no fusion risk regardless of grouping -- but adding it to
+// dx*dx is exactly the "product feeding a sum" shape the M19 codegen guard
+// (fma_codegen_test.go) exists to catch, and did: this call was still a bare
+// dx*dx+dz*dz until that guard was extended to this package and failed on
+// it. Routed through addProduct now, like every other such site in this
+// package.
 func tooClose(a, b rootCandidate) bool {
 	dx := float64(a.globalX() - b.globalX())
 	dz := float64(a.globalZ() - b.globalZ())
-	return dx*dx+dz*dz < minSpacing*minSpacing
+	distSq := addProduct(dx, dx, dz*dz)
+	return distSq < minSpacing*minSpacing
 }
 
 // splitmix64Step advances a 64-bit state by one splitmix64 step. Duplicated
@@ -315,6 +346,9 @@ func (g *Generator) candidateRoots(coord world.ChunkCoord) []rootCandidate {
 		state = splitmix64Step(state)
 		trunkHeight := minTrunkHeight + int(state%trunkHeightRange)
 
+		state = splitmix64Step(state)
+		densityRoll := state
+
 		out[i] = rootCandidate{
 			coord:       coord,
 			order:       i,
@@ -322,6 +356,7 @@ func (g *Generator) candidateRoots(coord world.ChunkCoord) []rootCandidate {
 			lz:          lz,
 			kind:        kind,
 			trunkHeight: trunkHeight,
+			densityRoll: densityRoll,
 		}
 	}
 	return out
@@ -351,6 +386,7 @@ func (g *Generator) candidateRoots(coord world.ChunkCoord) []rootCandidate {
 // TestGenerateIsIndependentOfLoadOrder and
 // TestFeatures_CrossBoundaryLoadOrderIndependence check.
 func (g *Generator) rootsAffecting(coord world.ChunkCoord) []rootCandidate {
+	poolRadius := g.poolRadius
 	pool := make([]rootCandidate, 0, (2*poolRadius+1)*(2*poolRadius+1)*attemptsPerChunk)
 	for dx := -poolRadius; dx <= poolRadius; dx++ {
 		for dz := -poolRadius; dz <= poolRadius; dz++ {
@@ -375,6 +411,7 @@ func (g *Generator) rootsAffecting(coord world.ChunkCoord) []rootCandidate {
 		}
 	}
 
+	featureChunkRadius := g.featureChunkRadius
 	out := make([]rootCandidate, 0, len(accepted))
 	for _, a := range accepted {
 		ddx := a.coord.X - coord.X
@@ -385,6 +422,31 @@ func (g *Generator) rootsAffecting(coord world.ChunkCoord) []rootCandidate {
 		}
 	}
 	return out
+}
+
+// biomeAllows reports whether root should actually become a feature: the
+// biome selected at its OWN root column (never the column of the block
+// currently being painted -- see paintRoot/placeIfInChunk, which is what
+// lets an allowed feature's geometry grow across a biome boundary) must
+// declare root.kind, and root's own densityRoll must land within that
+// declaration's Numerator/Denominator.
+//
+// This is the mechanism behind the milestone's "a feature is placed if the
+// biome at its root column allows it" design decision, and the property
+// TestFeaturesFollowRootBiome checks directly: a mutation that consulted a
+// different column here (e.g. the column currently being painted, or a
+// neighbour) would let a tree cross into a biome that never allows trees
+// without ever having been rooted in a permitting one.
+func (g *Generator) biomeAllows(root rootCandidate) bool {
+	biome := g.selectBiome(root.globalX(), root.globalZ())
+	if biome == nil {
+		return false
+	}
+	def, ok := biome.featureDensity(root.kind)
+	if !ok {
+		return false
+	}
+	return def.accepts(root.densityRoll)
 }
 
 // absOffset is the integer absolute value, used throughout this file for
@@ -402,6 +464,9 @@ func absOffset(v int) int {
 // content placed *on* terrain, never a replacement for it.
 func (g *Generator) paintFeatures(c *world.Chunk, coord world.ChunkCoord) {
 	for _, root := range g.rootsAffecting(coord) {
+		if !g.biomeAllows(root) {
+			continue
+		}
 		g.paintRoot(c, coord, root)
 	}
 }
