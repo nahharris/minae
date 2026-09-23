@@ -54,6 +54,18 @@ the range is *used*: values reach near its edges, every declared biome actually
 occurs, a feature appears at roughly its declared density. A biome that never
 appears is the same defect as a noise field using a third of its range.
 
+It has now happened twice in the same package. M20's 3D noise shipped with the
+same loose bound M16 had already replaced, reaching 0.2475 of its range. It was
+chosen knowingly, on the argument that "nothing downstream needs the
+normalisation to be tight". Downstream then quadrupled an amplitude to
+compensate and derived a search band from the documented range, making it four
+times too wide and the dominant cost of chunk generation. **A loose bound never
+costs nothing; it moves the cost somewhere harder to see.**
+
+The same applies to "occurs at a bounded rate". M20's overhang criterion was
+satisfied by thirteen columns in 655,360. Asserting "more than zero" is the
+event-rate version of asserting "within range".
+
 ## 5. Test terrain must have the shape the bug needs
 
 Three milestones running, the weak part of a test was its terrain rather than

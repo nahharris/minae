@@ -56,8 +56,13 @@ run = "go vet ./..."
 description = "Run go vet across all packages."
 
 [tasks.cover]
+# -timeout is a safety net against a hung test, not a performance budget. Go's
+# ten-minute default nearly failed CI twice on suites that were merely slow
+# under -race with atomic coverage: world/lighting in M18 and worldgen in M20.
+# Both were trimmed back well under it; this keeps a slower CI runner from
+# turning an otherwise green build red on an arbitrary number.
 run = [
-    "go test -race -covermode=atomic -coverprofile=coverage.out ./...",
+    "go test -race -covermode=atomic -timeout 20m -coverprofile=coverage.out ./...",
     "bash scripts/check-coverage.sh coverage.out .coverage-floor",
 ]
 description = "Run tests with coverage and enforce the floor in .coverage-floor."

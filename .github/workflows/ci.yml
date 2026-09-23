@@ -31,7 +31,8 @@ jobs:
         run: mise exec -- go vet ./...
 
       - name: Test
-        run: mise exec -- go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        # -timeout: see the comment on [tasks.cover] in mise.toml.
+        run: mise exec -- go test -race -covermode=atomic -timeout 20m -coverprofile=coverage.out ./...
 
       - name: Coverage floor
         run: mise exec -- bash scripts/check-coverage.sh coverage.out .coverage-floor

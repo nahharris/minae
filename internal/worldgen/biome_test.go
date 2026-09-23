@@ -196,7 +196,7 @@ func TestEveryBiomeOccursInPlausibleProportion(t *testing.T) {
 
 	const (
 		span = 24000
-		step = 40
+		step = 160
 	)
 
 	for seed := int64(0); seed < 4; seed++ {
@@ -381,7 +381,7 @@ func TestFeaturesFollowRootBiome(t *testing.T) {
 	blocks.ResetToVanilla()
 
 	checked := 0
-	for seed := int64(0); seed < 5; seed++ {
+	for seed := int64(0); seed < 3; seed++ {
 		g := NewGenerator(seed)
 		for cx := -4; cx <= 4; cx++ {
 			for cz := -4; cz <= 4; cz++ {

@@ -189,8 +189,9 @@ much heavier accumulation M20 brings.
 
 ## Manual verification
 
-- [ ] Biome regions read as places — a forest, a stretch of plains, a desert —
-      rather than as a patchwork.
+- [x] Biome regions read as places — a forest, a stretch of plains, a desert —
+      rather than as a patchwork. Confirmed 2026-09-23: "it's looking pretty dope".
+      The two items below were not separately confirmed, so they stay open.
 - [ ] Forest edges look like forest edges.
 - [ ] Walking from one biome into another feels like arriving somewhere.
 

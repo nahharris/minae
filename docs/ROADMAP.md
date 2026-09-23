@@ -32,7 +32,7 @@ milestone inherits the constraints in
 | [M17](milestones/M17-plains-terrain.md) | Plains terrain | ✅ Done | Real ground: continentalness, erosion, peaks-and-valleys through splines |
 | [M18](milestones/M18-vegetation-features.md) | Trees and bushes | ✅ Done | The first features, and the first transparent block |
 | [M19](milestones/M19-biome-selection.md) | Biome selection | ✅ Done | Climate axes including mysticness; data-driven surfaces and features; terrain shape untouched |
-| [M20](milestones/M20-density-terrain.md) | Density terrain | 📋 Planned | The heightmap becomes a 3D density field, anchored to reproduce M17 exactly |
+| [M20](milestones/M20-density-terrain.md) | Density terrain | ✅ Done | The heightmap becomes a 3D density field, anchored to reproduce M17 exactly |
 | [M21](milestones/M21-caves.md) | Caves | 📋 Planned | Noise caves carved as density subtraction |
 | [M22](milestones/M22-mysticness.md) | Mysticness | 📋 Planned | The first magi-tech biome, and floating islands — rare on purpose |
 

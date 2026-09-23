@@ -47,6 +47,22 @@ func TestSurfaceHeightIsDeterministic(t *testing.T) {
 // see chunk_test.go for the complementary check that Generate's actual
 // output agrees with this and is not merely coincidentally consistent with
 // it.
+//
+// Since M20, SurfaceHeight follows the density field, not just the 2D
+// heightmap -- an overhang IS a legitimate, deliberate discontinuity (a lip
+// can sit well above or below its neighbour's own ground), so the tight
+// maxAdjacentSlope bound this test used before M20 no longer holds
+// everywhere. maxSurfaceHeightJump adds 2*surfaceHeightBand of slack: the
+// worst case is one column's answer shifted by +surfaceHeightBand from its
+// own heightmap-only value and its neighbour's shifted by -surfaceHeightBand,
+// on top of whatever the heightmap-only formula itself could already differ
+// by. That is still a real, checked bound -- density.go's own comments prove
+// it -- not a bound loosened until the test stopped complaining: the classic
+// chunk-local-coordinate bug this test exists to catch produces jumps far
+// larger and far more often than a single rare overhang ever does, so it
+// still fails this test loudly.
+var maxSurfaceHeightJump = maxAdjacentSlope + 2*surfaceHeightBand
+
 func TestSurfaceHeightIsContinuousAcrossChunkBoundaries(t *testing.T) {
 	g := NewGenerator(7)
 
@@ -55,9 +71,9 @@ func TestSurfaceHeightIsContinuousAcrossChunkBoundaries(t *testing.T) {
 		for z := -50; z <= 50; z++ {
 			h0 := g.SurfaceHeight(boundary, z)
 			h1 := g.SurfaceHeight(boundary+1, z)
-			if d := iabs(h1 - h0); d > maxAdjacentSlope {
+			if d := iabs(h1 - h0); d > maxSurfaceHeightJump {
 				t.Fatalf("SurfaceHeight jumps by %d across the chunk seam at x=%d/%d, z=%d (%d -> %d); want at most %d",
-					d, boundary, boundary+1, z, h0, h1, maxAdjacentSlope)
+					d, boundary, boundary+1, z, h0, h1, maxSurfaceHeightJump)
 			}
 		}
 	}
@@ -89,15 +105,35 @@ func TestSurfaceHeightStaysInRange(t *testing.T) {
 	}
 }
 
-// Criterion 6: plains are flat-ish. Bound the slope over a large sample so
-// "plains" is a checked property, not an unverified claim.
+// plainsErosionCeiling is how M20's TestPlainsAreFlat identifies "plains":
+// erosionFactorAt no higher than this. The spline's range is [0.05, 0.6]
+// (see maxErosionScale); this cutoff sits well below its midpoint, so a
+// column passing it is genuinely on the flattened end, not a coin flip.
+const plainsErosionCeiling = 0.15
+
+// Criterion 5 ("Plains stay plains"): where erosion is high (small
+// erosionFactor), M17's slope bound still holds -- the milestone's own
+// wording, not "everywhere". Before M20 every column satisfied this bound,
+// because there was no 3D term to break it; since M20 an already-rough
+// column (low erosion, large erosionFactor) can legitimately have a much
+// larger local jump (an overhang), so this test restricts its sample to
+// columns erosionFactorAt itself calls flattened, exactly the set the
+// criterion is actually making a claim about. TestGeneratedChunkLayeringAgreesWithSurfaceHeight
+// and the overhang-specific tests in density_test.go cover the rest of the
+// terrain, where large jumps are expected rather than forbidden.
 func TestPlainsAreFlat(t *testing.T) {
 	for seed := int64(0); seed < 8; seed++ {
 		g := NewGenerator(seed)
 		rng := rand.New(rand.NewSource(seed + 1000))
-		for i := 0; i < 5000; i++ {
+
+		checked := 0
+		for i := 0; i < 200000 && checked < 5000; i++ {
 			x := rng.Intn(20000) - 10000
 			z := rng.Intn(20000) - 10000
+			if g.erosionFactorAt(x, z) > plainsErosionCeiling {
+				continue // not a plains column; skip it rather than weakening the bound for it
+			}
+			checked++
 			h := g.SurfaceHeight(x, z)
 
 			if d := iabs(g.SurfaceHeight(x+1, z) - h); d > maxAdjacentSlope {
@@ -106,6 +142,13 @@ func TestPlainsAreFlat(t *testing.T) {
 			if d := iabs(g.SurfaceHeight(x, z+1) - h); d > maxAdjacentSlope {
 				t.Fatalf("seed %d: slope in z at (%d,%d) is %d, want at most %d for plains", seed, x, z, d, maxAdjacentSlope)
 			}
+		}
+
+		// The precondition rule: this test's whole claim is about plains
+		// columns, so it must not pass vacuously because none were ever
+		// found in the sampled area.
+		if checked == 0 {
+			t.Fatalf("seed %d: found no columns with erosionFactorAt <= %.2f in 200000 samples; the plains-flatness bound was never actually exercised", seed, plainsErosionCeiling)
 		}
 	}
 }

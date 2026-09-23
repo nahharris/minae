@@ -33,6 +33,17 @@ func topSolidY(c *world.Chunk, x, z int) int {
 // generated chunk must have grass on top, dirtDepth layers of dirt beneath
 // it, stone below that, everywhere, with the surface sitting exactly at
 // SurfaceHeight for that column's global coordinates.
+//
+// Since M20, a column need not be a single solid run -- an overhang gives it
+// more than one -- so this checks the general property fillColumn is built to
+// satisfy (see its own doc comment) rather than assuming exactly one run:
+// every block's solidity must agree with density.go's own (uncached)
+// Generator.solidAt, and within each contiguous solid run scanning downward
+// from the top, the first block is the biome's surface, the next dirtDepth
+// are its filler, and the rest are stone. This is also criterion 7 exercised
+// directly against Generate's actual output: solidAt is the SAME function
+// SurfaceHeight's band scan calls, so if Generate's cached cornerCache path
+// ever disagreed with it, this would be the test that notices.
 func TestGeneratedChunkLayeringAgreesWithSurfaceHeight(t *testing.T) {
 	blocks.ResetToVanilla()
 
@@ -44,41 +55,47 @@ func TestGeneratedChunkLayeringAgreesWithSurfaceHeight(t *testing.T) {
 		gx := coord.X*config.ChunkWidth + x
 		for z := range config.ChunkWidth {
 			gz := coord.Z*config.ChunkWidth + z
-			want := g.SurfaceHeight(gx, gz)
+			h := g.clampHeight(g.rawSurfaceHeight(gx, gz))
+			biome := g.selectBiome(gx, gz)
 
+			want := g.SurfaceHeight(gx, gz)
 			if got := topSolidY(c, x, z); got != want {
 				t.Fatalf("column (%d,%d) [global (%d,%d)]: top solid block implies height %d, SurfaceHeight says %d",
 					x, z, gx, gz, got, want)
 			}
 
-			// Air at and above the surface -- except where a tree or bush
-			// (features.go, painted after fillColumn) put its own geometry
-			// there. Terrain fill itself never writes at or above a column's
-			// own SurfaceHeight, so any block found there can only be Wood or
-			// Leaves; anything else means fillColumn, not a feature, got the
-			// height wrong.
-			if b := c.GetBlock(x, want, z); b != nil && b != blocks.Wood && b != blocks.Leaves {
-				t.Fatalf("column (%d,%d): expected air (or a feature block) at y=%d (the surface), got %s", x, z, want, b.ID)
+			depth := -1
+			top := h + surfaceHeightBand
+			if top >= config.ChunkHeight {
+				top = config.ChunkHeight - 1
 			}
+			for y := top; y >= 0; y-- {
+				wantSolid := g.solidAt(gx, y, gz, h)
+				b := c.GetBlock(x, y, z)
+				gotSolid := b != nil && b != blocks.Wood && b != blocks.Leaves
 
-			// Grass on top.
-			if b := c.GetBlock(x, want-1, z); b != blocks.Grass {
-				t.Fatalf("column (%d,%d): expected grass at y=%d, got %v", x, z, want-1, b)
-			}
-
-			// dirtDepth layers of dirt beneath the grass.
-			for d := 2; d <= dirtDepth+1; d++ {
-				y := want - d
-				if b := c.GetBlock(x, y, z); b != blocks.Dirt {
-					t.Fatalf("column (%d,%d): expected dirt at y=%d, got %v", x, z, y, b)
+				if gotSolid != wantSolid {
+					t.Fatalf("column (%d,%d) y=%d: block solidity is %v, density.solidAt says %v", x, z, y, gotSolid, wantSolid)
 				}
-			}
 
-			// Stone everywhere below that. There is no bedrock block, so this
-			// runs all the way down to y=0.
-			for y := want - dirtDepth - 2; y >= 0; y-- {
-				if b := c.GetBlock(x, y, z); b != blocks.Stone {
-					t.Fatalf("column (%d,%d): expected stone at y=%d, got %v", x, z, y, b)
+				if !wantSolid {
+					depth = -1
+					continue
+				}
+				depth++
+				switch {
+				case depth == 0:
+					if b != biome.Surface {
+						t.Fatalf("column (%d,%d) y=%d: expected surface block %v (top of a solid run), got %v", x, z, y, biome.Surface, b)
+					}
+				case depth <= dirtDepth:
+					if b != biome.Filler {
+						t.Fatalf("column (%d,%d) y=%d: expected filler block %v (depth %d), got %v", x, z, y, biome.Filler, depth, b)
+					}
+				default:
+					if b != blocks.Stone {
+						t.Fatalf("column (%d,%d) y=%d: expected stone (depth %d), got %v", x, z, y, depth, b)
+					}
 				}
 			}
 		}
